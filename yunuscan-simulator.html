@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Yunuscan Simulator</title>
+<style>
+  *{box-sizing:border-box}
+  :root{
+    --ink:#2b1f1a;
+    --skin:#f2c8a6;
+    --skin2:#e0ac86;
+    --hair:#1e1712;
+    --shirt:#6d4a3c;
+    --shirt2:#835a49;
+    --pink:#ff5c8a;
+    --plum:#3b2340;
+    --screen:#fff4e8;
+    --case:#ffd7e3;
+    --case2:#f7b9cd;
+  }
+  html,body{height:100%}
+  body{
+    margin:0;
+    font-family:ui-rounded,"Avenir Next Rounded","Trebuchet MS",system-ui,sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(140% 100% at 50% -10%, #ffe6ef 0%, #f6d8e6 40%, #e7c6dd 100%);
+    display:grid;
+    place-items:center;
+    padding:16px;
+    overflow:hidden;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+
+  .console{
+    width:min(440px, 94vw);
+    background:linear-gradient(180deg, var(--case) 0%, var(--case2) 100%);
+    border:5px solid var(--ink);
+    border-radius:34px;
+    padding:16px 16px 18px;
+    box-shadow:0 14px 0 rgba(43,31,26,.18), 0 26px 50px rgba(59,35,64,.28);
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+
+  .brand{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:0 4px}
+  .brand h1{
+    margin:0;font-size:20px;letter-spacing:2.5px;font-weight:800;text-transform:uppercase;
+  }
+  .brand .ver{font-size:10px;letter-spacing:1.5px;opacity:.55;white-space:nowrap}
+
+  .screen{
+    position:relative;
+    height:min(42vh, 320px);
+    background:var(--screen);
+    border:5px solid var(--ink);
+    border-radius:22px;
+    overflow:hidden;
+    box-shadow:inset 0 6px 0 rgba(43,31,26,.07);
+  }
+  .screen.shake{animation:shake .42s ease-in-out}
+  @keyframes shake{
+    0%,100%{transform:translate(0,0)}
+    20%{transform:translate(-7px,3px)}
+    40%{transform:translate(6px,-3px)}
+    60%{transform:translate(-4px,2px)}
+    80%{transform:translate(3px,-1px)}
+  }
+  svg{width:100%;height:100%;display:block}
+
+  .meter{position:absolute;left:14px;top:12px;font-size:10px;letter-spacing:1.6px;font-weight:700;opacity:.75}
+  .bar{width:110px;height:11px;border:3px solid var(--ink);border-radius:99px;background:#fff;overflow:hidden;margin-top:4px}
+  .bar i{display:block;height:100%;width:100%;background:var(--pink);transition:width .45s ease}
+
+  .bubble{
+    position:absolute;top:12px;right:14px;max-width:180px;
+    background:#fff;border:3px solid var(--ink);border-radius:16px;
+    padding:7px 12px;font-size:14px;line-height:1.2;font-weight:600;
+    opacity:0;transform:translateY(-8px) scale(.9);transition:.22s ease;
+  }
+  .bubble.on{opacity:1;transform:none}
+
+  .fx{position:absolute;font-size:26px;pointer-events:none;animation:float 1.2s ease-out forwards}
+  @keyframes float{
+    0%{opacity:0;transform:translateY(10px) scale(.5)}
+    25%{opacity:1;transform:translateY(-6px) scale(1.1)}
+    100%{opacity:0;transform:translateY(-70px) scale(.9)}
+  }
+
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .key{
+    font:inherit;font-weight:800;font-size:14px;letter-spacing:1.5px;
+    padding:13px 6px 15px;
+    background:#fff;color:var(--ink);
+    border:4px solid var(--ink);border-radius:16px;
+    box-shadow:0 5px 0 var(--ink);
+    cursor:pointer;transition:transform .08s, box-shadow .08s, background .15s;
+  }
+  .key span{display:block;font-size:17px;margin-bottom:2px}
+  .key:hover{background:#fff0f5}
+  .key:active{transform:translateY(5px);box-shadow:0 0 0 var(--ink)}
+  .key:focus-visible{outline:3px solid var(--plum);outline-offset:3px}
+
+  .chat{
+    background:#fff;border:4px solid var(--ink);border-radius:18px;
+    max-height:0;opacity:0;padding:0 10px;overflow:hidden;
+    transition:max-height .35s ease, opacity .3s ease, padding .35s ease;
+  }
+  .chat.open{max-height:172px;opacity:1;padding:10px}
+  .log{max-height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:7px}
+  .msg{
+    max-width:80%;padding:7px 11px;font-size:13.5px;line-height:1.3;
+    border:2.5px solid var(--ink);border-radius:15px;word-wrap:break-word;
+    animation:pop .18s ease-out;
+  }
+  @keyframes pop{from{opacity:0;transform:translateY(6px) scale(.96)}to{opacity:1;transform:none}}
+  .msg.y{align-self:flex-start;background:#ffe6ee;border-bottom-left-radius:4px}
+  .msg.s{align-self:flex-end;background:#e4f0ff;border-bottom-right-radius:4px}
+  .who{font-size:9px;letter-spacing:1px;opacity:.5;font-weight:800;margin-bottom:2px;text-transform:uppercase}
+  .dots i{display:inline-block;width:6px;height:6px;margin:0 1px;border-radius:99px;background:var(--ink);opacity:.35;animation:dot 1s infinite}
+  .dots i:nth-child(2){animation-delay:.15s}
+  .dots i:nth-child(3){animation-delay:.3s}
+  @keyframes dot{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-4px);opacity:.9}}
+
+  .hint{text-align:center;font-size:10.5px;letter-spacing:.6px;opacity:.5;padding:0 6px}
+
+  /* --- ayril --- */
+  #ayril{
+    position:fixed;top:22px;right:24px;z-index:99;
+    font:inherit;font-weight:800;font-size:12px;letter-spacing:1.6px;
+    padding:10px 15px;
+    background:#fff;color:#b02a4a;
+    border:3px solid #b02a4a;border-radius:12px;
+    box-shadow:0 4px 0 #b02a4a;
+    cursor:default;
+    transition:left .18s cubic-bezier(.2,.9,.3,1), top .18s cubic-bezier(.2,.9,.3,1);
+    left:auto;
+  }
+
+  /* ---------- karakter ---------- */
+  #char{transform-box:fill-box;transform-origin:50% 100%;transition:transform .45s cubic-bezier(.2,.8,.3,1)}
+  #char.lean{transform:translate(-16px,0) rotate(-5deg)}
+  #head{transform-box:fill-box;transform-origin:50% 88%}
+  #head.hit{animation:hitAnim .7s .26s ease-out}
+  #head.pat{animation:patAnim 1.4s .2s ease-in-out}
+  @keyframes hitAnim{
+    0%{transform:rotate(0) translate(0,0)}
+    18%{transform:rotate(-15deg) translate(-12px,4px)}
+    38%{transform:rotate(9deg) translate(7px,-2px)}
+    58%{transform:rotate(-5deg) translate(-3px,1px)}
+    100%{transform:rotate(0) translate(0,0)}
+  }
+  @keyframes patAnim{
+    0%,100%{transform:rotate(0) translate(0,0)}
+    30%{transform:rotate(-4deg) translate(-4px,3px)}
+    60%{transform:rotate(-2deg) translate(-2px,1px)}
+  }
+  #eyesNormal{transform-box:fill-box;transform-origin:center;animation:blink 5s infinite}
+  @keyframes blink{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+  #mouthTalk{transform-box:fill-box;transform-origin:center;animation:yap .34s infinite alternate}
+  @keyframes yap{from{transform:scaleY(.35)}to{transform:scaleY(1)}}
+
+  .prop{opacity:0}
+  #handPet.go{animation:petAnim 1.8s ease-in-out}
+  @keyframes petAnim{
+    0%{opacity:0;transform:translate(130px,26px) rotate(12deg)}
+    12%{opacity:1}
+    26%{transform:translate(0,0) rotate(0)}
+    40%{transform:translate(-7px,15px) rotate(-7deg)}
+    54%{transform:translate(0,0) rotate(0)}
+    68%{transform:translate(-7px,15px) rotate(-7deg)}
+    82%{transform:translate(0,-2px) rotate(0);opacity:1}
+    100%{opacity:0;transform:translate(130px,26px) rotate(12deg)}
+  }
+  #handSlap.go{animation:slapAnim .95s ease-in-out}
+  @keyframes slapAnim{
+    0%{opacity:0;transform:translate(150px,-46px) rotate(-32deg)}
+    14%{opacity:1}
+    34%{transform:translate(-34px,14px) rotate(16deg)}
+    52%{transform:translate(-26px,22px) rotate(20deg)}
+    100%{opacity:0;transform:translate(160px,-30px) rotate(-22deg)}
+  }
+  #fist.go{animation:punchAnim .95s ease-in-out}
+  @keyframes punchAnim{
+    0%{opacity:0;transform:translate(-150px,26px) scale(.75)}
+    14%{opacity:1}
+    34%{transform:translate(58px,-6px) scale(1.06)}
+    52%{transform:translate(48px,0) scale(1)}
+    100%{opacity:0;transform:translate(-160px,26px) scale(.8)}
+  }
+  #boot.go{animation:kickAnim .95s ease-in-out}
+  @keyframes kickAnim{
+    0%{opacity:0;transform:translate(-130px,70px) rotate(-24deg)}
+    14%{opacity:1}
+    34%{transform:translate(96px,-104px) rotate(26deg)}
+    52%{transform:translate(86px,-94px) rotate(22deg)}
+    100%{opacity:0;transform:translate(-140px,70px) rotate(-24deg)}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:.01ms !important;animation-iteration-count:1 !important}
+  }
+</style>
+</head>
+<body>
+
+<div class="console">
+  <div class="brand">
+    <h1>Yunuscan Simulator</h1>
+    <div class="ver">v1.0 · tek oyunculu</div>
+  </div>
+
+  <div class="screen" id="screen">
+    <div class="meter">SEVGİ
+      <div class="bar"><i id="fill"></i></div>
+    </div>
+    <div class="bubble" id="bubble"></div>
+
+    <svg id="scene" viewBox="0 0 400 440" preserveAspectRatio="xMidYMax meet" aria-label="Yunus Can">
+      <defs>
+        <clipPath id="faceClip"><ellipse cx="200" cy="182" rx="94" ry="102"/></clipPath>
+      </defs>
+
+      <ellipse cx="200" cy="424" rx="112" ry="14" fill="rgba(43,31,26,.10)"/>
+
+      <g id="char">
+        <!-- kollar -->
+        <path d="M136 362 C112 388 106 416 108 442" stroke="#2b1f1a" stroke-width="32" fill="none" stroke-linecap="round"/>
+        <path d="M136 362 C112 388 106 416 108 442" stroke="var(--shirt)" stroke-width="24" fill="none" stroke-linecap="round"/>
+        <path d="M264 362 C288 388 294 416 292 442" stroke="#2b1f1a" stroke-width="32" fill="none" stroke-linecap="round"/>
+        <path d="M264 362 C288 388 294 416 292 442" stroke="var(--shirt)" stroke-width="24" fill="none" stroke-linecap="round"/>
+
+        <!-- boyun + gövde -->
+        <rect x="180" y="272" width="40" height="46" rx="14" fill="var(--skin2)" stroke="#2b1f1a" stroke-width="5"/>
+        <path d="M124 442 C124 372 156 330 200 330 C244 330 276 372 276 442 Z" fill="var(--shirt)" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M178 332 L200 368 L170 356 Z" fill="var(--shirt2)" stroke="#2b1f1a" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M222 332 L200 368 L230 356 Z" fill="var(--shirt2)" stroke="#2b1f1a" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M200 372 L200 442" stroke="#2b1f1a" stroke-width="3.5" opacity=".5"/>
+        <circle cx="200" cy="392" r="4" fill="#2b1f1a" opacity=".5"/>
+        <circle cx="200" cy="420" r="4" fill="#2b1f1a" opacity=".5"/>
+
+        <g id="head">
+          <!-- kulaklar -->
+          <ellipse cx="108" cy="198" rx="14" ry="21" fill="var(--skin)" stroke="#2b1f1a" stroke-width="5"/>
+          <ellipse cx="292" cy="198" rx="14" ry="21" fill="var(--skin)" stroke="#2b1f1a" stroke-width="5"/>
+          <!-- yüz -->
+          <ellipse cx="200" cy="182" rx="94" ry="102" fill="var(--skin)" stroke="#2b1f1a" stroke-width="5"/>
+          <!-- sakal gölgesi -->
+          <g clip-path="url(#faceClip)">
+            <path d="M96 238 Q140 232 160 252 Q200 278 240 252 Q260 232 304 238 L304 300 L96 300 Z" fill="#2b1f1a" opacity=".12"/>
+          </g>
+          <!-- saç -->
+          <path d="M106 190 C99 100 145 60 200 60 C255 60 301 100 294 190 C288 150 277 128 257 120 C230 108 213 129 177 125 C147 122 122 141 112 175 Z"
+                fill="var(--hair)" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M232 68 L246 52 L252 74" fill="var(--hair)" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M168 66 L156 50 L150 72" fill="var(--hair)" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round"/>
+
+          <!-- kaşlar (imza) -->
+          <g id="brows">
+            <path d="M134 170 C150 156 174 154 186 162" stroke="var(--hair)" stroke-width="14" fill="none" stroke-linecap="round"/>
+            <path d="M214 162 C226 154 250 156 266 170" stroke="var(--hair)" stroke-width="14" fill="none" stroke-linecap="round"/>
+          </g>
+
+          <!-- gözler -->
+          <g id="eyesNormal">
+            <ellipse cx="158" cy="198" rx="16" ry="13" fill="#fff" stroke="#2b1f1a" stroke-width="4"/>
+            <circle cx="160" cy="199" r="7.5" fill="#4a2c18"/>
+            <circle cx="162.5" cy="196" r="2.6" fill="#fff"/>
+            <ellipse cx="242" cy="198" rx="16" ry="13" fill="#fff" stroke="#2b1f1a" stroke-width="4"/>
+            <circle cx="240" cy="199" r="7.5" fill="#4a2c18"/>
+            <circle cx="242.5" cy="196" r="2.6" fill="#fff"/>
+          </g>
+          <g id="eyesHappy" style="display:none">
+            <path d="M141 203 Q158 183 175 203" stroke="#2b1f1a" stroke-width="6" fill="none" stroke-linecap="round"/>
+            <path d="M225 203 Q242 183 259 203" stroke="#2b1f1a" stroke-width="6" fill="none" stroke-linecap="round"/>
+          </g>
+          <g id="eyesX" style="display:none">
+            <path d="M147 188 L169 208 M169 188 L147 208" stroke="#2b1f1a" stroke-width="6" stroke-linecap="round"/>
+            <path d="M231 188 L253 208 M253 188 L231 208" stroke="#2b1f1a" stroke-width="6" stroke-linecap="round"/>
+          </g>
+
+          <!-- allık -->
+          <ellipse id="blushL" cx="138" cy="234" rx="19" ry="10" fill="#ff8fab" opacity="0"/>
+          <ellipse id="blushR" cx="262" cy="234" rx="19" ry="10" fill="#ff8fab" opacity="0"/>
+
+          <!-- burun -->
+          <path d="M201 202 L193 234 Q200 243 211 236" fill="none" stroke="#2b1f1a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+          <!-- ağızlar -->
+          <path id="mouthIdle" d="M174 260 Q200 270 226 259" fill="none" stroke="#2b1f1a" stroke-width="5" stroke-linecap="round"/>
+          <path id="mouthSmile" style="display:none" d="M164 253 Q200 296 236 253 Z" fill="#c2536a" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round"/>
+          <ellipse id="mouthHurt" style="display:none" cx="200" cy="264" rx="17" ry="21" fill="#c2536a" stroke="#2b1f1a" stroke-width="5"/>
+          <ellipse id="mouthTalk" style="display:none" cx="200" cy="262" rx="14" ry="11" fill="#c2536a" stroke="#2b1f1a" stroke-width="5"/>
+        </g>
+      </g>
+
+      <!-- eller / ayak -->
+      <g transform="translate(292,138)">
+        <g id="handPet" class="prop"><g transform="rotate(152)">
+          <g fill="var(--skin)" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round">
+            <rect x="-16" y="-24" width="14" height="32" rx="7"/>
+            <rect x="-1" y="-30" width="14" height="38" rx="7"/>
+            <rect x="14" y="-24" width="14" height="32" rx="7"/>
+            <rect x="-22" y="-2" width="50" height="46" rx="18"/>
+            <rect x="24" y="8" width="26" height="14" rx="7"/>
+            <rect x="-14" y="40" width="34" height="30" rx="11"/>
+          </g>
+        </g></g>
+      </g>
+
+      <g transform="translate(300,164)">
+        <g id="handSlap" class="prop"><g transform="rotate(118)">
+          <g fill="var(--skin)" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round">
+            <rect x="-16" y="-24" width="14" height="32" rx="7"/>
+            <rect x="-1" y="-30" width="14" height="38" rx="7"/>
+            <rect x="14" y="-24" width="14" height="32" rx="7"/>
+            <rect x="-22" y="-2" width="50" height="46" rx="18"/>
+            <rect x="24" y="8" width="26" height="14" rx="7"/>
+            <rect x="-14" y="40" width="34" height="30" rx="11"/>
+          </g>
+        </g></g>
+      </g>
+
+      <g transform="translate(80,196)">
+        <g id="fist" class="prop">
+          <circle cx="0" cy="0" r="31" fill="var(--skin)" stroke="#2b1f1a" stroke-width="5"/>
+          <path d="M-19 -7 h38 M-19 8 h36" stroke="#2b1f1a" stroke-width="4" stroke-linecap="round"/>
+          <rect x="-15" y="26" width="32" height="28" rx="11" fill="var(--skin)" stroke="#2b1f1a" stroke-width="5"/>
+        </g>
+      </g>
+
+      <g transform="translate(66,404)">
+        <g id="boot" class="prop"><g transform="rotate(-18)">
+          <path d="M0 -34 L26 -34 L34 6 L70 24 Q84 32 84 44 Q84 56 70 56 L14 56 Q-2 56 -2 40 Z"
+                fill="#3a2c26" stroke="#2b1f1a" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M-2 40 L84 44" stroke="#2b1f1a" stroke-width="5" opacity=".5"/>
+        </g></g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="pad">
+    <button class="key" id="btnSev"><span>💗</span>SEV</button>
+    <button class="key" id="btnDov"><span>👊</span>DÖV</button>
+    <button class="key" id="btnKonus"><span>💬</span>KONUŞ</button>
+  </div>
+
+  <div class="chat" id="chat"><div class="log" id="log"></div></div>
+
+  <div class="hint">üç tuş var. dördüncüsünü boşver, zaten yakalayamazsın.</div>
+</div>
+
+<button id="ayril" tabindex="-1" aria-hidden="true">AYRIL ✕</button>
+
+<script>
+(function(){
+  "use strict";
+
+  var screenEl = document.getElementById('screen');
+  var bubble   = document.getElementById('bubble');
+  var fill     = document.getElementById('fill');
+  var charEl   = document.getElementById('char');
+  var headEl   = document.getElementById('head');
+  var chat     = document.getElementById('chat');
+  var log      = document.getElementById('log');
+
+  var eyes = {
+    normal: document.getElementById('eyesNormal'),
+    happy:  document.getElementById('eyesHappy'),
+    x:      document.getElementById('eyesX')
+  };
+  var mouths = {
+    idle:  document.getElementById('mouthIdle'),
+    smile: document.getElementById('mouthSmile'),
+    hurt:  document.getElementById('mouthHurt'),
+    talk:  document.getElementById('mouthTalk')
+  };
+  var blushL = document.getElementById('blushL');
+  var blushR = document.getElementById('blushR');
+
+  var love = 100;
+  var busy = false;
+
+  function show(map, key){
+    for (var k in map){ map[k].style.display = (k === key) ? '' : 'none'; }
+  }
+  function face(eyeKey, mouthKey, blush){
+    show(eyes, eyeKey);
+    show(mouths, mouthKey);
+    blushL.setAttribute('opacity', blush ? '.75' : '0');
+    blushR.setAttribute('opacity', blush ? '.75' : '0');
+  }
+  function idleFace(){ face('normal', 'idle', false); }
+
+  function play(el, dur){
+    el.classList.remove('go');
+    el.getBoundingClientRect();
+    el.classList.add('go');
+    setTimeout(function(){ el.classList.remove('go'); }, dur);
+  }
+  function playHead(cls, dur){
+    headEl.classList.remove(cls);
+    headEl.getBoundingClientRect();
+    headEl.classList.add(cls);
+    setTimeout(function(){ headEl.classList.remove(cls); }, dur);
+  }
+
+  var bubbleTimer;
+  function say(text){
+    bubble.textContent = text;
+    bubble.classList.add('on');
+    clearTimeout(bubbleTimer);
+    bubbleTimer = setTimeout(function(){ bubble.classList.remove('on'); }, 2200);
+  }
+
+  function burst(txt, n){
+    for (var i = 0; i < n; i++){
+      (function(i){
+        var el = document.createElement('div');
+        el.className = 'fx';
+        el.textContent = txt;
+        el.style.left = (26 + Math.random() * 52) + '%';
+        el.style.top  = (32 + Math.random() * 26) + '%';
+        el.style.animationDelay = (i * 110) + 'ms';
+        screenEl.appendChild(el);
+        setTimeout(function(){ el.remove(); }, 1500 + i * 110);
+      })(i);
+    }
+  }
+
+  function setLove(v){
+    love = Math.max(88, Math.min(100, v));
+    fill.style.width = love + '%';
+  }
+  function pick(a){ return a[Math.floor(Math.random() * a.length)]; }
+
+  /* ---------------- SEV ---------------- */
+  var sevLines = ['🥰','bir daha bir daha','of ya','iyi ki varsın','kalpten gidiyorum','tamam ben eridim'];
+
+  document.getElementById('btnSev').addEventListener('click', function(){
+    if (busy) return;
+    busy = true;
+    face('happy', 'smile', true);
+    play(document.getElementById('handPet'), 1800);
+    playHead('pat', 1600);
+    burst('💕', 4);
+    setLove(love + 3);
+    say(pick(sevLines));
+    setTimeout(function(){ idleFace(); busy = false; }, 1900);
+  });
+
+  /* ---------------- DÖV ---------------- */
+  var moves = [
+    { prop: 'handSlap', fx: '💢', line: ['aaa tokat mı o','yanağım','tamam tamam sustum'] },
+    { prop: 'fist',     fx: '💥', line: ['aaaaa','niye ki 😭','hak ettim galiba'] },
+    { prop: 'boot',     fx: '⭐', line: ['tekme fazlaydı','ayy','yine de seviyorum seni'] }
+  ];
+
+  document.getElementById('btnDov').addEventListener('click', function(){
+    if (busy) return;
+    busy = true;
+    var m = pick(moves);
+    play(document.getElementById(m.prop), 950);
+    playHead('hit', 1000);
+    setTimeout(function(){
+      screenEl.classList.add('shake');
+      face('x', 'hurt', false);
+      burst(m.fx, 3);
+      setTimeout(function(){ screenEl.classList.remove('shake'); }, 450);
+    }, 320);
+    setLove(love - 2);
+    setTimeout(function(){ say(love <= 88 ? 'kalbim yine de sende' : pick(m.line)); }, 420);
+    setTimeout(function(){ idleFace(); busy = false; }, 1700);
+  });
+
+  /* ---------------- KONUŞ ---------------- */
+  var Y = 'yunus can', S = 'sen';
+  var scripts = [
+    [ {w:'y',t:'günaydınnnnn'},
+      {w:'y',t:'günayyydııııınnnnn'},
+      {w:'s',t:'günaydın 🥰'},
+      {w:'y',t:'bugün de çok güzelsin bu arada'},
+      {w:'y',t:'her gün söylüyorum ama sakın alışma'} ],
+
+    [ {w:'y',t:'napıyosun'},
+      {w:'y',t:'napıyosunnnn'},
+      {w:'s',t:'hiç, sen?'},
+      {w:'y',t:'seni düşünüyorum, tam zamanlı iş bu'},
+      {w:'y',t:'yunus can holding, tek müşteri: sen'} ],
+
+    [ {w:'y',t:'özledimmm'},
+      {w:'y',t:'çokkk özledimmmm'},
+      {w:'s',t:'daha 2 saat oldu 😅'},
+      {w:'y',t:'2 saat çok uzun bir süre bence'} ],
+
+    [ {w:'y',t:'bi soru sorcam'},
+      {w:'s',t:'sor'},
+      {w:'y',t:'sen benim sevgilim misin'},
+      {w:'s',t:'evet 🙄'},
+      {w:'y',t:'tamam tamam garanti olsun dedim'} ],
+
+    [ {w:'y',t:'kalk kalk kalk'},
+      {w:'y',t:'kahvaltı yapıcaz'},
+      {w:'y',t:'menü: ne istersen'},
+      {w:'s',t:'sen yap o zaman'},
+      {w:'y',t:'yaparım tabii, sen sofraya otur yeter'} ],
+
+    [ {w:'y',t:'uyudun mu'},
+      {w:'y',t:'uyuduysan haber ver'},
+      {w:'s',t:'😐'},
+      {w:'y',t:'iyi geceler aşkım'},
+      {w:'y',t:'rüyanda yunus can görürsün umarım'} ],
+
+    [ {w:'y',t:'bak bi oyun yaptım'},
+      {w:'y',t:'içinde sadece ben varım'},
+      {w:'s',t:'nerden buldun bu fikri'},
+      {w:'y',t:'beni sevesin diye'},
+      {w:'y',t:'bi de o kırmızı butona basmaya çalış istersen 😌'} ]
+  ];
+
+  var token = 0;
+  function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+  function addMsg(w, text){
+    var d = document.createElement('div');
+    d.className = 'msg ' + w;
+    var who = document.createElement('div');
+    who.className = 'who';
+    who.textContent = (w === 'y') ? Y : S;
+    var p = document.createElement('div');
+    p.textContent = text;
+    d.appendChild(who); d.appendChild(p);
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+    return d;
+  }
+  function addTyping(w){
+    var d = document.createElement('div');
+    d.className = 'msg ' + w + ' dots';
+    d.innerHTML = '<i></i><i></i><i></i>';
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+    return d;
+  }
+
+  document.getElementById('btnKonus').addEventListener('click', function(){
+    runChat();
+  });
+
+  function runChat(){
+    var t = ++token;
+    chat.classList.add('open');
+    log.innerHTML = '';
+    charEl.classList.add('lean');
+    idleFace();
+
+    var script = pick(scripts);
+    var i = 0;
+
+    function step(){
+      if (t !== token) return;
+      if (i >= script.length){
+        charEl.classList.remove('lean');
+        idleFace();
+        return;
+      }
+      var m = script[i++];
+      wait(m.w === 'y' ? 420 : 620).then(function(){
+        if (t !== token) return;
+        var typing = addTyping(m.w);
+        if (m.w === 'y') face('normal', 'talk', false);
+        return wait(480 + m.t.length * 20).then(function(){
+          if (t !== token){ typing.remove(); return; }
+          typing.remove();
+          idleFace();
+          addMsg(m.w, m.t);
+          step();
+        });
+      });
+    }
+    step();
+  }
+
+  /* ---------------- AYRIL (asla) ---------------- */
+  var ayril = document.getElementById('ayril');
+
+  function placeInit(){
+    var r = ayril.getBoundingClientRect();
+    ayril.style.left = (window.innerWidth - r.width - 24) + 'px';
+    ayril.style.top  = '22px';
+    ayril.style.right = 'auto';
+  }
+  placeInit();
+
+  function flee(mx, my){
+    var w = ayril.offsetWidth, h = ayril.offsetHeight, pad = 14;
+    var maxX = Math.max(pad, window.innerWidth  - w - pad);
+    var maxY = Math.max(pad, window.innerHeight - h - pad);
+    var best = null, bestD = -1;
+    for (var i = 0; i < 30; i++){
+      var x = pad + Math.random() * (maxX - pad);
+      var y = pad + Math.random() * (maxY - pad);
+      var d = Math.hypot(mx - (x + w / 2), my - (y + h / 2));
+      if (d > bestD){ bestD = d; best = { x: x, y: y }; }
+    }
+    ayril.style.left = best.x + 'px';
+    ayril.style.top  = best.y + 'px';
+  }
+
+  document.addEventListener('mousemove', function(e){
+    var r = ayril.getBoundingClientRect();
+    var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (Math.hypot(e.clientX - cx, e.clientY - cy) < 135) flee(e.clientX, e.clientY);
+  }, { passive: true });
+
+  ['mouseover','mouseenter','mousedown','pointerdown','touchstart','focus'].forEach(function(ev){
+    ayril.addEventListener(ev, function(e){
+      if (e.preventDefault) e.preventDefault();
+      var r = ayril.getBoundingClientRect();
+      flee(r.left + r.width / 2, r.top + r.height / 2);
+    });
+  });
+
+  // kazara basılırsa: hiçbir şey olmaz.
+  ayril.addEventListener('click', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  });
+
+  window.addEventListener('resize', function(){
+    var r = ayril.getBoundingClientRect();
+    if (r.right > window.innerWidth || r.bottom > window.innerHeight) placeInit();
+  });
+
+  setLove(100);
+  idleFace();
+})();
+</script>
+<script>try{if(window.parent!==window){window.parent.postMessage("salon:hazir","*")}}catch(e){}</script>
+</body>
+</html>

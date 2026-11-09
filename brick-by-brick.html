@@ -1,0 +1,2137 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Brick by Brick — Yunus &amp; Şevval</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;display:grid;place-items:center;padding:14px;
+    background:radial-gradient(140% 100% at 50% -10%, #ffe6ef 0%, #f4d6e6 45%, #e2c1da 100%);
+    font-family:ui-rounded,"Avenir Next Rounded","Trebuchet MS",system-ui,sans-serif;
+    color:#2b1f1a;user-select:none;-webkit-user-select:none;overflow:hidden;
+  }
+  .wrap{width:min(920px,96vw);display:flex;flex-direction:column;gap:10px}
+  .top{display:flex;align-items:baseline;justify-content:space-between;padding:0 6px}
+  .top h1{margin:0;font-size:18px;letter-spacing:2.5px;text-transform:uppercase;font-weight:800}
+  .top .n{font-size:11px;letter-spacing:1.4px;opacity:.55}
+  canvas{
+    width:100%;display:block;background:#fff4e8;
+    border:5px solid #2b1f1a;border-radius:20px;
+    box-shadow:0 12px 0 rgba(43,31,26,.16),0 24px 44px rgba(59,35,64,.25);
+    touch-action:none;cursor:default;
+  }
+  .foot{display:flex;justify-content:space-between;gap:10px;padding:0 6px;font-size:11px;letter-spacing:.6px;opacity:.55}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Brick by Brick</h1>
+    <div class="n">51 tuğla · 51 bulmaca · Yunus &amp; Şevval</div>
+  </div>
+  <canvas id="cv" width="900" height="560"></canvas>
+  <div class="foot"><span>Sudoku: 1–9 yaz · N not · H ipucu</span><span>Blok: sürükle-bırak · Z geri al</span></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+/* =====================================================================
+   01 · CORE — canvas, helpers, input, audio, save, characters
+   ===================================================================== */
+var cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+var W = 900, H = 560, DPR = 1;
+try { DPR = Math.min(2, Math.max(1, window.devicePixelRatio || 1)); } catch (e) {}
+cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+
+var INK = '#2b1f1a', SKIN = '#f2c8a6', HAIR = '#1e1712', SHIRT = '#6d4a3c', PINK = '#ff5c8a', CREAM = '#fff4e8';
+var FONT = 'ui-rounded,"Avenir Next Rounded","Trebuchet MS",system-ui,sans-serif';
+var LEGO = ['#E0475F', '#3F7FD0', '#F2B632', '#4FB06A', '#F58A3A', '#8E6BC8', '#2FB5B5'];
+
+/* ---------- small helpers ---------- */
+function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function rnd(a, b) { return a + Math.random() * (b - a); }
+function rndi(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
+function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; }
+  return a;
+}
+function easeOutCubic(t) { t = clamp(t, 0, 1); return 1 - Math.pow(1 - t, 3); }
+function easeOutBack(t) { t = clamp(t, 0, 1); var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
+function inR(px, py, x, y, w, h) { return px >= x && px <= x + w && py >= y && py <= y + h; }
+
+var _sh = {};
+function shade(hex, f) {
+  var key = hex + '|' + f;
+  if (_sh[key]) return _sh[key];
+  var n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  if (f >= 0) { r = Math.round(r + (255 - r) * f); g = Math.round(g + (255 - g) * f); b = Math.round(b + (255 - b) * f); }
+  else { r = Math.round(r * (1 + f)); g = Math.round(g * (1 + f)); b = Math.round(b * (1 + f)); }
+  return (_sh[key] = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1));
+}
+
+/* ---------- drawing helpers ---------- */
+function ink(w) { ctx.lineWidth = w || 3; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; }
+function rr(x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+function fs(x, y, w, h, r, fill, lw) { rr(x, y, w, h, r === undefined ? 6 : r); ctx.fillStyle = fill; ctx.fill(); ink(lw || 3); ctx.stroke(); }
+function circle(x, y, r, fill, lw) {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (lw !== 0) { ink(lw || 3); ctx.stroke(); }
+}
+function txt(s, x, y, size, col, align, weight) {
+  ctx.fillStyle = col || INK;
+  ctx.font = (weight || '800') + ' ' + (size || 18) + 'px ' + FONT;
+  ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(s, x, y);
+}
+function txtO(s, x, y, size, fill, stroke, lw, align) {
+  ctx.font = '900 ' + size + 'px ' + FONT; ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.lineWidth = lw || 6; ctx.strokeStyle = stroke || INK; ctx.strokeText(s, x, y);
+  ctx.fillStyle = fill || '#fff'; ctx.fillText(s, x, y);
+}
+function txtW(s, size, weight) { ctx.font = (weight || '800') + ' ' + size + 'px ' + FONT; return ctx.measureText(s).width; }
+function wrapLines(s, maxW, size, weight) {
+  ctx.font = (weight || '700') + ' ' + size + 'px ' + FONT;
+  var words = String(s).split(' '), lines = [], cur = '';
+  for (var i = 0; i < words.length; i++) {
+    var t = cur ? cur + ' ' + words[i] : words[i];
+    if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = words[i]; } else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+function para(s, x, y, maxW, size, col, lh, align, weight) {
+  var lines = wrapLines(s, maxW, size, weight || '700');
+  for (var i = 0; i < lines.length; i++) txt(lines[i], x, y + i * lh, size, col, align || 'center', weight || '700');
+  return lines.length;
+}
+function drawHeartAt(x, y, r, col) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(r / 10, r / 10);
+  ctx.beginPath();
+  ctx.moveTo(0, 7); ctx.bezierCurveTo(-12, -2, -8, -12, 0, -6); ctx.bezierCurveTo(8, -12, 12, -2, 0, 7);
+  ctx.closePath(); ctx.fillStyle = col || PINK; ctx.fill(); ink(2.4); ctx.stroke();
+  ctx.restore();
+}
+function drawStar(x, y, r, col) {
+  ctx.beginPath();
+  for (var i = 0; i < 10; i++) {
+    var a = -Math.PI / 2 + i * Math.PI / 5, rad = i % 2 ? r * 0.45 : r;
+    ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+  }
+  ctx.closePath(); ctx.fillStyle = col || '#ffd166'; ctx.fill(); ink(2); ctx.stroke();
+}
+
+/* ---------- particles ---------- */
+var parts = [];
+function burst(x, y, n, cols, o) {
+  o = o || {};
+  for (var i = 0; i < n; i++) {
+    var a = rnd(0, Math.PI * 2), sp = rnd(o.minSp || 60, o.maxSp || 220);
+    parts.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - (o.up || 40), g: o.g === undefined ? 520 : o.g,
+      life: rnd(o.minLife || 0.5, o.maxLife || 0.95), t: 0, size: rnd(o.minSize || 3, o.maxSize || 7), col: pick(cols), kind: o.kind || 'sq', rot: rnd(0, 6), vr: rnd(-8, 8) });
+  }
+}
+function floatHearts(x, y, n) {
+  for (var i = 0; i < n; i++)
+    parts.push({ x: x + rnd(-24, 24), y: y + rnd(-6, 6), vx: rnd(-18, 18), vy: rnd(-70, -40), g: -6, life: rnd(1.0, 1.7), t: -i * 0.09, size: rnd(7, 12), col: pick([PINK, '#ff8fb0', '#ff5c8a', '#ffb3c8']), kind: 'heart', rot: 0, vr: 0 });
+}
+function updateParts(dt) {
+  for (var i = parts.length - 1; i >= 0; i--) {
+    var p = parts[i]; p.t += dt;
+    if (p.t < 0) continue;
+    p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+    if (p.t > p.life) parts.splice(i, 1);
+  }
+}
+function drawParts() {
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i]; if (p.t < 0) continue;
+    var a = clamp(1 - p.t / p.life, 0, 1);
+    ctx.globalAlpha = Math.min(1, a * 1.6);
+    if (p.kind === 'heart') drawHeartAt(p.x, p.y, p.size, p.col);
+    else if (p.kind === 'star') drawStar(p.x, p.y, p.size, p.col);
+    else { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col; ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size); ctx.restore(); }
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* ---------- audio (tiny WebAudio blips) ---------- */
+var AC = null, master = null, muted = false;
+function audioInit() {
+  if (AC) { try { if (AC.state === 'suspended') AC.resume(); } catch (e) {} return; }
+  try {
+    var A = window.AudioContext || window.webkitAudioContext;
+    if (!A) return;
+    AC = new A(); master = AC.createGain(); master.gain.value = 0.14; master.connect(AC.destination);
+  } catch (e) { AC = null; }
+}
+function tone(f, d, type, vol, delay, slide) {
+  if (!AC || muted) return;
+  try {
+    var t0 = AC.currentTime + (delay || 0), o = AC.createOscillator(), g = AC.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(f, t0);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, slide), t0 + d);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol || 0.5, t0 + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+    o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + d + 0.03);
+  } catch (e) {}
+}
+function noise(d, vol, delay, hp) {
+  if (!AC || muted) return;
+  try {
+    var t0 = AC.currentTime + (delay || 0), len = Math.max(1, Math.floor(AC.sampleRate * d)), buf = AC.createBuffer(1, len, AC.sampleRate), data = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    var s = AC.createBufferSource(), g = AC.createGain(), f = AC.createBiquadFilter();
+    f.type = 'highpass'; f.frequency.value = hp || 1200; s.buffer = buf;
+    g.gain.setValueAtTime(vol || 0.4, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+    s.connect(f); f.connect(g); g.connect(master); s.start(t0);
+  } catch (e) {}
+}
+function sfx(n) {
+  if (!AC || muted) return;
+  switch (n) {
+    case 'click': tone(620, 0.05, 'triangle', 0.35); break;
+    case 'num': tone(540, 0.06, 'sine', 0.35); break;
+    case 'erase': tone(300, 0.06, 'sine', 0.3); break;
+    case 'bad': tone(190, 0.16, 'sawtooth', 0.22, 0, 120); break;
+    case 'good': tone(660, 0.09, 'triangle', 0.4); tone(990, 0.14, 'triangle', 0.4, 0.08); break;
+    case 'word': tone(523, 0.1, 'triangle', 0.4); tone(659, 0.1, 'triangle', 0.4, 0.09); tone(784, 0.18, 'triangle', 0.4, 0.18); break;
+    case 'drop': tone(380, 0.07, 'square', 0.18); break;
+    case 'pop': tone(820, 0.07, 'sine', 0.3, 0, 500); break;
+    case 'clear': tone(523, 0.09, 'triangle', 0.4); tone(659, 0.09, 'triangle', 0.4, 0.07); tone(784, 0.09, 'triangle', 0.4, 0.14); tone(1046, 0.16, 'triangle', 0.4, 0.21); break;
+    case 'snap': noise(0.05, 0.5, 0, 900); tone(210, 0.09, 'square', 0.3, 0, 120); tone(840, 0.05, 'triangle', 0.25, 0.03); break;
+    case 'win': [523, 659, 784, 1046, 1318].forEach(function (f, i) { tone(f, 0.18, 'triangle', 0.42, i * 0.1); }); break;
+    case 'meow': tone(620, 0.25, 'sawtooth', 0.14, 0, 380); tone(540, 0.25, 'triangle', 0.2, 0.0, 330); break;
+  }
+}
+
+/* ---------- save ---------- */
+var SAVE_KEY = 'brickbybrick.v1';
+var save = { level: 0, seen: {}, muted: false, sec: 0, skips: 0, intro: false };
+function loadSave() {
+  try {
+    var s = window.localStorage && window.localStorage.getItem(SAVE_KEY);
+    if (s) { var o = JSON.parse(s); if (o && typeof o.level === 'number') { save.level = o.level; save.seen = o.seen || {}; save.muted = !!o.muted; save.sec = o.sec || 0; save.skips = o.skips || 0; save.intro = !!o.intro; } }
+  } catch (e) {}
+  muted = save.muted;
+}
+function writeSave() { try { window.localStorage && window.localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
+
+/* ---------- input ---------- */
+var keys = {};
+var ptr = { x: -99, y: -99, down: false, clickAt: null, dx: 0, dy: 0, moved: 0 };
+function evPos(e) {
+  var r = cv.getBoundingClientRect(), w = r.width || W, h = r.height || H;
+  return { x: (e.clientX - r.left) * W / w, y: (e.clientY - r.top) * H / h };
+}
+cv.addEventListener('pointerdown', function (e) {
+  audioInit();
+  var p = evPos(e); ptr.x = p.x; ptr.y = p.y; ptr.down = true; ptr.dx = p.x; ptr.dy = p.y; ptr.moved = 0;
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.preventDefault) e.preventDefault();
+  onPointerDown(p.x, p.y);
+});
+window.addEventListener('pointermove', function (e) {
+  var p = evPos(e); ptr.x = p.x; ptr.y = p.y;
+  if (ptr.down) ptr.moved = Math.max(ptr.moved, Math.hypot(p.x - ptr.dx, p.y - ptr.dy));
+  onPointerMove(p.x, p.y);
+});
+function pointerUp(e) {
+  var p = evPos(e); ptr.x = p.x; ptr.y = p.y;
+  var was = ptr.down; ptr.down = false;
+  if (was) { if (ptr.moved < 12) ptr.clickAt = { x: p.x, y: p.y }; onPointerUp(p.x, p.y); }
+}
+window.addEventListener('pointerup', pointerUp);
+window.addEventListener('pointercancel', pointerUp);
+window.addEventListener('keydown', function (e) {
+  audioInit();
+  var code = e.code || '', key = e.key || '';
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace'].indexOf(code) >= 0 && e.preventDefault) e.preventDefault();
+  keys[code] = true;
+  onKey(code, key);
+});
+window.addEventListener('keyup', function (e) { keys[e.code || ''] = false; });
+
+/* ---------- immediate-mode button ---------- */
+var uiLock = false;
+function btn(x, y, w, h, label, o) {
+  o = o || {};
+  var dis = !!o.disabled, locked = uiLock;
+  var over = !dis && !locked && inR(ptr.x, ptr.y, x, y, w, h);
+  var down = over && ptr.down;
+  var depth = o.flat ? 0 : 4, rad = o.r === undefined ? 12 : o.r;
+  var fill = dis ? '#e4d9cc' : (o.fill || '#fff');
+  var yy = y + (down ? depth : 0);
+  if (!down && depth) { rr(x, y + depth, w, h, rad); ctx.fillStyle = INK; ctx.fill(); }
+  rr(x, yy, w, h, rad); ctx.fillStyle = over && !down ? shade(fill, 0.22) : fill; ctx.fill();
+  ink(o.lw || 3); ctx.stroke();
+  if (label) txt(label, x + w / 2, yy + h / 2 + 1, o.size || 15, dis ? 'rgba(43,31,26,.38)' : (o.color || INK), 'center', '800');
+  if (o.draw) o.draw(x + w / 2, yy + h / 2, w, h, over);
+  var clicked = false;
+  if (!dis && !locked && ptr.clickAt && inR(ptr.clickAt.x, ptr.clickAt.y, x, y, w, h)) { clicked = true; ptr.clickAt = null; sfx('click'); }
+  return clicked;
+}
+
+/* ---------- characters (same look as the earlier games) ---------- */
+function drawYunus(x, y, s, o) {
+  o = o || {};
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  var d = o.duck ? 0.5 : 1, bh = 26 * d;
+  ink(4); ctx.beginPath();
+  var sw = o.walk ? Math.sin(o.walk) * 5 : 0;
+  ctx.moveTo(-6, -bh); ctx.lineTo(-6 + sw, 0); ctx.moveTo(6, -bh); ctx.lineTo(6 - sw, 0); ctx.stroke();
+  if (o.cheer) {
+    var a = Math.sin((o.t || 0) * 12) * 3;
+    ctx.strokeStyle = SHIRT; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath();
+    ctx.moveTo(-12, -bh); ctx.lineTo(-24, -bh - 16 + a); ctx.moveTo(12, -bh); ctx.lineTo(24, -bh - 16 - a); ctx.stroke();
+    circle(-24, -bh - 16 + a, 4.5, SKIN, 2.4); circle(24, -bh - 16 - a, 4.5, SKIN, 2.4);
+  }
+  fs(-12, -bh - 4, 24, bh + 6, 7, SHIRT);
+  var hy = -bh - 4 - 17;
+  circle(0, hy, 17, SKIN);
+  ctx.beginPath(); ctx.arc(0, hy, 17, Math.PI * 1.02, Math.PI * 2.02); ctx.closePath();
+  ctx.fillStyle = HAIR; ctx.fill(); ink(3); ctx.stroke();
+  ink(3.4); ctx.beginPath();
+  ctx.moveTo(-11, hy - 3); ctx.lineTo(-3, hy - 5); ctx.moveTo(3, hy - 5); ctx.lineTo(11, hy - 3); ctx.stroke();
+  if (o.happy) {
+    ink(2.6); ctx.beginPath(); ctx.moveTo(-11, hy + 5); ctx.quadraticCurveTo(-7, hy - 1, -3, hy + 5);
+    ctx.moveTo(3, hy + 5); ctx.quadraticCurveTo(7, hy - 1, 11, hy + 5); ctx.stroke();
+  } else if (o.worried) {
+    circle(-7, hy + 5, 2.6, INK, 0); circle(7, hy + 5, 2.6, INK, 0);
+  } else { circle(-7, hy + 4, 2.6, INK, 0); circle(7, hy + 4, 2.6, INK, 0); }
+  ink(2.4); ctx.beginPath();
+  if (o.happy) ctx.arc(0, hy + 7, 6, 0.15 * Math.PI, 0.85 * Math.PI);
+  else if (o.worried) ctx.arc(0, hy + 13, 5, 1.15 * Math.PI, 1.85 * Math.PI);
+  else { ctx.moveTo(-5, hy + 11); ctx.lineTo(5, hy + 11); }
+  ctx.stroke();
+  ctx.restore();
+}
+function drawSevval(x, y, s, o) {
+  o = o || {};
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ink(4); ctx.beginPath(); ctx.moveTo(-5, -22); ctx.lineTo(-5, 0); ctx.moveTo(5, -22); ctx.lineTo(5, 0); ctx.stroke();
+  if (o.cheer) {
+    var a = Math.sin((o.t || 0) * 12 + 1) * 3;
+    ctx.strokeStyle = SKIN; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath();
+    ctx.moveTo(-8, -28); ctx.lineTo(-22, -42 + a); ctx.moveTo(8, -28); ctx.lineTo(22, -42 - a); ctx.stroke();
+    circle(-22, -42 + a, 4, SKIN, 2.4); circle(22, -42 - a, 4, SKIN, 2.4);
+  }
+  ctx.beginPath(); ctx.moveTo(-9, -30); ctx.lineTo(9, -30); ctx.lineTo(15, -2); ctx.lineTo(-15, -2); ctx.closePath();
+  ctx.fillStyle = '#ff8fb0'; ctx.fill(); ink(3); ctx.stroke();
+  var hy = -30 - 17;
+  circle(0, hy, 17, SKIN);
+  ctx.beginPath(); ctx.arc(0, hy, 18, Math.PI * 0.97, Math.PI * 2.03); ctx.closePath();
+  ctx.fillStyle = '#2f2119'; ctx.fill(); ink(3); ctx.stroke();
+  circle(-16, hy + 3, 7, '#2f2119'); circle(16, hy + 3, 7, '#2f2119');
+  if (o.tired) {
+    ink(2.4); ctx.beginPath(); ctx.moveTo(-11, hy + 4); ctx.lineTo(-2, hy + 4); ctx.moveTo(2, hy + 4); ctx.lineTo(11, hy + 4); ctx.stroke();
+  } else if (o.happy) {
+    ink(2.6); ctx.beginPath(); ctx.moveTo(-11, hy + 3); ctx.quadraticCurveTo(-6, hy - 2, -1, hy + 3);
+    ctx.moveTo(3, hy + 3); ctx.quadraticCurveTo(9, hy - 2, 14, hy + 3); ctx.stroke();
+  } else {
+    circle(-7, hy + 3, 5.2, '#fff'); circle(7, hy + 3, 5.2, '#fff');
+    circle(-6.5, hy + 4, 3, '#3a2418', 0); circle(7.5, hy + 4, 3, '#3a2418', 0);
+    circle(-5.4, hy + 2.6, 1.2, '#fff', 0); circle(8.6, hy + 2.6, 1.2, '#fff', 0);
+  }
+  ctx.globalAlpha = 0.65; circle(-11, hy + 10, 3.6, '#ff9ab5', 0); circle(11, hy + 10, 3.6, '#ff9ab5', 0); ctx.globalAlpha = 1;
+  ink(2); ctx.beginPath(); ctx.moveTo(0, hy + 8); ctx.lineTo(1.5, hy + 9.5); ctx.stroke();
+  ink(2.4); ctx.beginPath(); ctx.arc(0, hy + (o.happy ? 9 : 10), 4.5, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+  ctx.restore();
+}
+
+/* =====================================================================
+   02 · CAT — the lego cat model, bricks, baseplate, drop animation
+   ===================================================================== */
+var CAT_W = 16, CAT_H = 15;
+var CAT_COL = { O: '#F5A03C', D: '#D9792A', C: '#FFE8C4', P: '#FF8FA8', K: '#2F2420', W: '#FFFFFF', R: '#E0475F', Y: '#FFD166' };
+var PLATE_COL = '#5DB86C';
+/* [x, y, w, h, color] — in build order (feet first, sparkles last) */
+var BRICKS = [
+  [2, 14, 3, 1, 'C'], [9, 14, 3, 1, 'C'], [1, 12, 4, 2, 'O'], [5, 10, 1, 4, 'C'], [6, 11, 2, 3, 'C'], [8, 10, 1, 4, 'C'], [9, 12, 4, 2, 'O'],
+  [13, 13, 2, 1, 'O'], [14, 9, 1, 4, 'O'], [1, 11, 1, 1, 'O'], [2, 10, 3, 2, 'O'], [9, 10, 3, 2, 'O'], [12, 11, 1, 1, 'O'],
+  [3, 9, 4, 1, 'R'], [7, 9, 4, 1, 'R'], [15, 9, 1, 1, 'O'], [2, 8, 1, 1, 'O'], [3, 6, 2, 3, 'O'], [5, 7, 4, 2, 'C'], [9, 8, 3, 1, 'O'], [15, 8, 1, 1, 'D'],
+  [1, 4, 2, 4, 'O'], [9, 6, 4, 2, 'O'], [5, 6, 1, 1, 'C'], [6, 6, 2, 1, 'P'], [8, 6, 1, 1, 'C'], [3, 5, 1, 1, 'K'], [4, 4, 4, 2, 'O'], [8, 4, 2, 2, 'O'], [10, 5, 1, 1, 'K'], [11, 2, 2, 4, 'O'],
+  [1, 2, 1, 2, 'O'], [2, 0, 1, 4, 'O'], [3, 3, 1, 1, 'O'], [4, 3, 1, 1, 'D'], [5, 3, 1, 1, 'O'], [6, 3, 2, 1, 'D'], [8, 3, 1, 1, 'O'], [9, 3, 1, 1, 'D'], [10, 3, 1, 1, 'O'],
+  [3, 1, 1, 2, 'P'], [4, 1, 1, 2, 'O'], [5, 2, 4, 1, 'O'], [9, 1, 1, 2, 'O'], [10, 1, 1, 2, 'P'], [11, 0, 1, 2, 'O'], [3, 0, 1, 1, 'O'], [10, 0, 1, 1, 'O'],
+  [6, 10, 2, 1, 'Y'], [3, 4, 1, 1, 'W'], [10, 4, 1, 1, 'W']
+];
+var TOTAL = BRICKS.length;
+var CHAPTERS = [
+  { name: 'Patiler ve Gövde', from: 0, to: 13 },
+  { name: 'Tasma ve Boyun', from: 13, to: 21 },
+  { name: 'Yüz ve Burun', from: 21, to: 31 },
+  { name: 'Alın Çizgileri', from: 31, to: 40 },
+  { name: 'Kulaklar', from: 40, to: 48 },
+  { name: 'Son Dokunuşlar', from: 48, to: 51 }
+];
+function chapterOf(i) {
+  for (var k = 0; k < CHAPTERS.length; k++) if (i >= CHAPTERS[k].from && i < CHAPTERS[k].to) return k;
+  return CHAPTERS.length - 1;
+}
+
+/* ---------- soft studded background (pre-rendered once) ---------- */
+var _bg = null;
+function bgPattern() {
+  if (!_bg) {
+    try {
+      var c = document.createElement('canvas'); c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
+      var g = c.getContext('2d'); g.scale(DPR, DPR);
+      g.fillStyle = '#fff4e8'; g.fillRect(0, 0, W, H);
+      g.fillStyle = 'rgba(43,31,26,.045)';
+      for (var y = 0; y < H + 40; y += 40) for (var x = 0; x < W + 40; x += 40) {
+        var ox = ((y / 40) % 2) * 20;
+        g.beginPath(); g.arc(x + ox, y, 9, 0, 6.2832); g.fill();
+      }
+      _bg = c;
+    } catch (e) { _bg = false; }
+  }
+  if (_bg) ctx.drawImage(_bg, 0, 0, W, H); else { ctx.fillStyle = '#fff4e8'; ctx.fillRect(0, 0, W, H); }
+}
+
+/* ---------- bricks ---------- */
+function stud(cx, cy, r, col) {
+  ctx.fillStyle = shade(col, -0.30);
+  ctx.beginPath(); ctx.arc(cx + r * 0.10, cy + r * 0.22, r, 0, 6.2832); ctx.fill();
+  ctx.fillStyle = shade(col, 0.12);
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill();
+  ctx.lineWidth = Math.max(1.3, r * 0.2); ctx.strokeStyle = shade(col, -0.5); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.55)';
+  ctx.beginPath(); ctx.arc(cx - r * 0.32, cy - r * 0.34, r * 0.27, 0, 6.2832); ctx.fill();
+}
+/* a rectangular brick of w×h cells with its top-left at pixel (x,y) */
+function brickRect(x, y, w, h, cs, col, o) {
+  o = o || {};
+  var g = o.gap === undefined ? 1.2 : o.gap, r = cs * 0.16;
+  rr(x + g, y + g, w * cs - 2 * g, h * cs - 2 * g, r);
+  ctx.fillStyle = col; ctx.fill();
+  ctx.save(); rr(x + g, y + g, w * cs - 2 * g, h * cs - 2 * g, r); ctx.clip();
+  ctx.fillStyle = 'rgba(0,0,0,.11)'; ctx.fillRect(x, y + h * cs - cs * 0.17, w * cs, cs * 0.2);
+  ctx.fillStyle = 'rgba(255,255,255,.24)'; ctx.fillRect(x, y, w * cs, cs * 0.11);
+  ctx.restore();
+  rr(x + g, y + g, w * cs - 2 * g, h * cs - 2 * g, r);
+  ink(o.lw || Math.max(2, cs * 0.095)); ctx.stroke();
+  if (!o.nostuds) for (var dy = 0; dy < h; dy++) for (var dx = 0; dx < w; dx++) stud(x + (dx + 0.5) * cs, y + (dy + 0.5) * cs, cs * 0.3, col);
+}
+function drawBrick(b, ox, oy, cs, o) { brickRect(ox + b[0] * cs, oy + b[1] * cs, b[2], b[3], cs, CAT_COL[b[4]], o); }
+function drawGhostBrick(b, ox, oy, cs, a) {
+  var x = ox + b[0] * cs, y = oy + b[1] * cs, g = 1.4;
+  rr(x + g, y + g, b[2] * cs - 2 * g, b[3] * cs - 2 * g, cs * 0.16);
+  ctx.fillStyle = 'rgba(255,255,255,' + (0.17 * a) + ')'; ctx.fill();
+  ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,' + (0.6 * a) + ')'; ctx.stroke(); ctx.setLineDash([]);
+}
+/* draws one brick centred in a box (used for cards / previews) */
+function brickPreview(i, cx, cy, maxW, maxH, cap) {
+  var b = BRICKS[i], cs = Math.min(maxW / b[2], maxH / b[3], cap || 44);
+  brickRect(cx - b[2] * cs / 2, cy - b[3] * cs / 2, b[2], b[3], cs, CAT_COL[b[4]]);
+}
+
+/* ---------- baseplate ---------- */
+function plateRect(ox, oy, cs) { var pad = cs * 0.55; return { x: ox - pad, y: oy - pad, w: CAT_W * cs + 2 * pad, h: CAT_H * cs + 2 * pad }; }
+function drawPlate(ox, oy, cs) {
+  var p = plateRect(ox, oy, cs);
+  rr(p.x, p.y + 9, p.w, p.h, 18); ctx.fillStyle = INK; ctx.fill();
+  rr(p.x, p.y, p.w, p.h, 18); ctx.fillStyle = PLATE_COL; ctx.fill();
+  ctx.save(); rr(p.x, p.y, p.w, p.h, 18); ctx.clip();
+  ctx.fillStyle = 'rgba(255,255,255,.14)'; ctx.fillRect(p.x, p.y, p.w, 10);
+  ctx.restore();
+  for (var y = 0; y < CAT_H; y++) for (var x = 0; x < CAT_W; x++) stud(ox + (x + 0.5) * cs, oy + (y + 0.5) * cs, cs * 0.3, PLATE_COL);
+  rr(p.x, p.y, p.w, p.h, 18); ink(4); ctx.stroke();
+}
+
+/* ---------- the cat itself ----------
+   n      : how many bricks are placed
+   o.ghost: show faint outlines of the missing bricks
+   o.next : pulse phase (seconds) for the next brick, or undefined
+   o.skip : brick index not to draw (it is dropping right now)
+   o.glow : {i, a} soft halo behind a freshly placed brick            */
+function drawCatModel(n, ox, oy, cs, o) {
+  o = o || {};
+  var i;
+  if (o.ghost) for (i = n; i < TOTAL; i++) if (i !== o.skip) drawGhostBrick(BRICKS[i], ox, oy, cs, 1);
+  for (i = 0; i < n; i++) if (i !== o.skip) drawBrick(BRICKS[i], ox, oy, cs);
+  if (o.glow && o.glow.a > 0.01) {
+    var b = BRICKS[o.glow.i], x = ox + b[0] * cs, y = oy + b[1] * cs, e = (1 - o.glow.a) * cs * 0.9;
+    rr(x - e, y - e, b[2] * cs + 2 * e, b[3] * cs + 2 * e, cs * 0.3 + e * 0.5);
+    ctx.lineWidth = 4 * o.glow.a + 1; ctx.strokeStyle = 'rgba(255,255,255,' + (o.glow.a * 0.95) + ')'; ctx.stroke();
+  }
+  if (o.next !== undefined && n < TOTAL && n !== o.skip) {
+    var nb = BRICKS[n], nx = ox + nb[0] * cs, ny = oy + nb[1] * cs, p = 0.5 + 0.5 * Math.sin(o.next * 5);
+    rr(nx + 1, ny + 1, nb[2] * cs - 2, nb[3] * cs - 2, cs * 0.16);
+    ctx.lineWidth = 3; ctx.setLineDash([7, 5]); ctx.lineDashOffset = -o.next * 14;
+    ctx.strokeStyle = 'rgba(255,224,120,' + (0.55 + 0.45 * p) + ')'; ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+  }
+}
+
+/* ---------- drop animation (the star of the show) ---------- */
+var dropA = null;
+var DROP_FALL = 0.55, DROP_TOTAL = 1.25;
+function dropStart(i) { dropA = { i: i, t: 0, landed: false }; }
+function dropIdx() { return dropA ? dropA.i : -1; }
+/* returns true once, when the animation has finished */
+function dropUpdate(dt, ox, oy, cs) {
+  if (!dropA) return false;
+  var d = dropA; d.t += dt;
+  if (!d.landed && d.t >= DROP_FALL) {
+    d.landed = true;
+    var b = BRICKS[d.i], cx = ox + (b[0] + b[2] / 2) * cs, cy = oy + (b[1] + b[3] / 2) * cs;
+    sfx('snap');
+    burst(cx, cy, 14 + b[2] * b[3] * 2, [CAT_COL[b[4]], shade(CAT_COL[b[4]], 0.4), '#ffffff', '#ffd166'], { minSp: 70, maxSp: 240, up: 90, minSize: 3, maxSize: 7 });
+    burst(cx, cy, 5, ['#ffd166', '#fff'], { kind: 'star', minSp: 40, maxSp: 160, up: 120, minSize: 5, maxSize: 9, g: 260 });
+  }
+  if (d.t >= DROP_TOTAL) { dropA = null; return true; }
+  return false;
+}
+function dropGlow() {
+  if (!dropA || !dropA.landed) return null;
+  return { i: dropA.i, a: clamp(1 - (dropA.t - DROP_FALL) / 0.6, 0, 1) };
+}
+function dropDraw(ox, oy, cs) {
+  if (!dropA) return;
+  var d = dropA, b = BRICKS[d.i], x = ox + b[0] * cs, y = oy + b[1] * cs, w = b[2] * cs, h = b[3] * cs;
+  var col = CAT_COL[b[4]];
+  if (d.t < DROP_FALL) {
+    var u = d.t / DROP_FALL, off = -(H * 0.62) * (1 - u * u), sc = 1 + 0.35 * (1 - u);
+    /* shadow on the plate, growing as it approaches */
+    ctx.globalAlpha = 0.10 + 0.30 * u;
+    rr(x + 2, y + 2, w - 4, h - 4, cs * 0.16); ctx.fillStyle = INK; ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.save(); ctx.translate(x + w / 2, y + h / 2 + off); ctx.scale(sc, sc);
+    ctx.globalAlpha = Math.min(1, u * 4 + 0.15);
+    brickRect(-w / 2, -h / 2, b[2], b[3], cs, col);
+    ctx.restore(); ctx.globalAlpha = 1;
+  } else {
+    var s = d.t - DROP_FALL, k = Math.exp(-s * 8) * Math.sin(s * 26);
+    ctx.save(); ctx.translate(x + w / 2, y + h); ctx.scale(1 + 0.12 * k, 1 - 0.18 * k); ctx.translate(-(x + w / 2), -(y + h));
+    brickRect(x, y, b[2], b[3], cs, col);
+    ctx.restore();
+  }
+}
+
+/* ---------- the alive cat (final scene) ---------- */
+function drawCatAlive(ox, oy, cs, t, o) {
+  o = o || {};
+  var bob = Math.abs(Math.sin(t * 3.2)) * (o.jump || 0);
+  var i, b;
+  ctx.save();
+  ctx.translate(0, -bob);
+  var sq = 1 + Math.sin(t * 6.4) * 0.012;
+  ctx.translate(ox + CAT_W * cs / 2, oy + CAT_H * cs); ctx.scale(1 / sq, sq); ctx.translate(-(ox + CAT_W * cs / 2), -(oy + CAT_H * cs));
+  for (i = 0; i < TOTAL; i++) {
+    b = BRICKS[i];
+    if (b[0] >= 13) {                 /* tail: swish around its root */
+      var px = ox + 13 * cs, py = oy + 13.5 * cs, a = Math.sin(t * 4) * 0.16 + (o.tailBoost || 0) * Math.sin(t * 14) * 0.2;
+      ctx.save(); ctx.translate(px, py); ctx.rotate(a); ctx.translate(-px, -py); drawBrick(b, ox, oy, cs); ctx.restore();
+    } else drawBrick(b, ox, oy, cs);
+  }
+  /* blink: orange lids over the black eye bricks */
+  var ph = (t % 3.4);
+  if (ph > 3.15 || (o.happy && ph > 1.7 && ph < 2.2)) {
+    [3, 10].forEach(function (ex) {
+      var x = ox + ex * cs, y = oy + 4 * cs;
+      rr(x + 1.2, y + 1.2, cs - 2.4, cs * 2 - 2.4, cs * 0.16); ctx.fillStyle = CAT_COL.O; ctx.fill(); ink(Math.max(2, cs * 0.095)); ctx.stroke();
+      ink(Math.max(2.4, cs * 0.12)); ctx.beginPath(); ctx.moveTo(x + cs * 0.15, y + cs * 1.05); ctx.quadraticCurveTo(x + cs * 0.5, y + cs * (o.happy ? 0.7 : 1.3), x + cs * 0.85, y + cs * 1.05); ctx.stroke();
+    });
+  }
+  ctx.restore();
+}
+
+/* =====================================================================
+   02b · UI helpers shared by the scenes and the puzzles
+   ===================================================================== */
+function panel(x, y, w, h, fill, r) {
+  r = r === undefined ? 16 : r;
+  rr(x, y + 5, w, h, r); ctx.fillStyle = INK; ctx.fill();
+  rr(x, y, w, h, r); ctx.fillStyle = fill || '#fff'; ctx.fill(); ink(3.5); ctx.stroke();
+}
+/* speech bubble; tail points down to (tx, y+h+tl) */
+function bubble(x, y, w, h, text, tx, o) {
+  o = o || {};
+  var tl = o.tail === undefined ? 14 : o.tail, tw = 9;
+  tx = clamp(tx === undefined ? x + w / 2 : tx, x + 18, x + w - 18);
+  ctx.beginPath();
+  var r = 14;
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  if (tl) { ctx.lineTo(tx + tw, y + h); ctx.lineTo(tx, y + h + tl); ctx.lineTo(tx - tw, y + h); }
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  ctx.fillStyle = o.fill || '#fff'; ctx.fill(); ink(3); ctx.stroke();
+  if (text) {
+    var size = o.size || 15, lines = wrapLines(text, w - 24, size, '800');
+    var lh = size * 1.25, y0 = y + h / 2 - (lines.length - 1) * lh / 2;
+    for (var i = 0; i < lines.length; i++) txt(lines[i], x + w / 2, y0 + i * lh, size, o.color || INK, 'center', '800');
+  }
+}
+/* small coloured tag */
+function chip(x, y, w, h, label, fill, size, color) {
+  fs(x, y, w, h, h / 2, fill || '#fff', 2.6);
+  txt(label, x + w / 2, y + h / 2 + 1, size || 13, color || INK, 'center', '800');
+}
+/* thin progress bar */
+function bar(x, y, w, h, p, fill, back) {
+  rr(x, y, w, h, h / 2); ctx.fillStyle = back || '#efe1cf'; ctx.fill();
+  if (p > 0) { ctx.save(); rr(x, y, w, h, h / 2); ctx.clip(); ctx.fillStyle = fill || '#4FB06A'; ctx.fillRect(x, y, Math.max(h, w * clamp(p, 0, 1)), h); ctx.restore(); }
+  rr(x, y, w, h, h / 2); ink(2.6); ctx.stroke();
+}
+/* tiny icons for the three puzzle types */
+function iconSudoku(cx, cy, s, col) {
+  var c = s / 3;
+  fs(cx - 1.5 * c, cy - 1.5 * c, 3 * c, 3 * c, 4, '#fff', 2.4);
+  ink(1.8); ctx.beginPath();
+  ctx.moveTo(cx - 0.5 * c, cy - 1.5 * c); ctx.lineTo(cx - 0.5 * c, cy + 1.5 * c);
+  ctx.moveTo(cx + 0.5 * c, cy - 1.5 * c); ctx.lineTo(cx + 0.5 * c, cy + 1.5 * c);
+  ctx.moveTo(cx - 1.5 * c, cy - 0.5 * c); ctx.lineTo(cx + 1.5 * c, cy - 0.5 * c);
+  ctx.moveTo(cx - 1.5 * c, cy + 0.5 * c); ctx.lineTo(cx + 1.5 * c, cy + 0.5 * c); ctx.stroke();
+  txt('7', cx - c, cy - c, c * 0.8, INK, 'center', '900'); txt('3', cx + c, cy, c * 0.8, col || '#2f6fd3', 'center', '900'); txt('5', cx, cy + c, c * 0.8, INK, 'center', '900');
+}
+function iconBlocks(cx, cy, s) {
+  var c = s / 3.2;
+  var cells = [[0, 0, LEGO[0]], [1, 0, LEGO[0]], [0, 1, LEGO[0]], [2, 2, LEGO[1]], [1, 2, LEGO[2]], [2, 1, LEGO[2]]];
+  for (var i = 0; i < cells.length; i++) {
+    var x = cx - 1.5 * c + cells[i][0] * c, y = cy - 1.5 * c + cells[i][1] * c;
+    fs(x + 1, y + 1, c - 2, c - 2, 3, cells[i][2], 2.2);
+  }
+}
+function iconWend(cx, cy, s) {
+  var c = s / 3;
+  var pts = [[-1, -1], [0, -1], [0, 0], [1, 0], [1, 1]];
+  ctx.strokeStyle = '#ff8fb0'; ctx.lineWidth = c * 0.55; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath();
+  for (var i = 0; i < pts.length; i++) ctx[i ? 'lineTo' : 'moveTo'](cx + pts[i][0] * c, cy + pts[i][1] * c);
+  ctx.stroke();
+  var L = 'WEND';
+  for (var j = 0; j < pts.length - 1; j++) circle(cx + pts[j][0] * c, cy + pts[j][1] * c, c * 0.42, '#fff', 2.2);
+  circle(cx + pts[4][0] * c, cy + pts[4][1] * c, c * 0.42, '#fff', 2.2);
+}
+function drawTypeIcon(type, cx, cy, s) { if (type === 'sudoku') iconSudoku(cx, cy, s); else if (type === 'blocks') iconBlocks(cx, cy, s); else iconWend(cx, cy, s); }
+
+/* =====================================================================
+   03 · SUDOKU — 4×4 → 6×6 → 9×9, always solvable by logic (no guessing)
+   ===================================================================== */
+var SU = null;
+var _suU = {};
+function suUnits(N, br, bc) {
+  var key = N + '_' + br + '_' + bc;
+  if (_suU[key]) return _suU[key];
+  var U = [], i, j, bpr = N / bc, boxOf = [];
+  for (i = 0; i < N; i++) { var rw = [], cl = []; for (j = 0; j < N; j++) { rw.push(i * N + j); cl.push(j * N + i); } U.push(rw, cl); }
+  for (var b = 0; b < N; b++) {
+    var bl = [], r0 = Math.floor(b / bpr) * br, c0 = (b % bpr) * bc;
+    for (i = 0; i < br; i++) for (j = 0; j < bc; j++) bl.push((r0 + i) * N + c0 + j);
+    U.push(bl);
+  }
+  for (i = 0; i < N * N; i++) boxOf.push(Math.floor(Math.floor(i / N) / br) * bpr + Math.floor((i % N) / bc));
+  var peers = [];
+  for (i = 0; i < N * N; i++) {
+    var set = {}, list = [];
+    for (var u = 0; u < U.length; u++) if (U[u].indexOf(i) >= 0) for (j = 0; j < U[u].length; j++) { var c = U[u][j]; if (c !== i && !set[c]) { set[c] = 1; list.push(c); } }
+    peers.push(list);
+  }
+  return (_suU[key] = { units: U, peers: peers, boxOf: boxOf });
+}
+function suCfg(tier) {
+  if (tier < 2) return { N: 4, br: 2, bc: 2, givens: tier === 0 ? 10 : 8, hidden: false, name: '4×4' };
+  if (tier < 10) return { N: 6, br: 2, bc: 3, givens: [23, 22, 21, 20, 19, 18, 17, 16][tier - 2], hidden: tier > 3, name: 'Mini 6×6' };
+  return { N: 9, br: 3, bc: 3, givens: [47, 45, 43, 41, 39, 37, 35][tier - 10], hidden: tier > 11, name: '9×9' };
+}
+function suFill(N, br, bc) {
+  var U = suUnits(N, br, bc), ALL = (1 << N) - 1;
+  for (var attempt = 0; attempt < 60; attempt++) {
+    var g = [], rowM = [], colM = [], boxM = [], i;
+    for (i = 0; i < N * N; i++) g.push(0);
+    for (i = 0; i < N; i++) { rowM.push(0); colM.push(0); boxM.push(0); }
+    var nodes = 0, limit = 30000;
+    var rec = function (pos) {
+      if (pos === N * N) return true;
+      if (++nodes > limit) return false;
+      var r = (pos / N) | 0, c = pos % N, b = U.boxOf[pos];
+      var avail = ALL & ~(rowM[r] | colM[c] | boxM[b]);
+      if (!avail) return false;
+      var ds = []; for (var d = 0; d < N; d++) if ((avail >> d) & 1) ds.push(d);
+      shuffle(ds);
+      for (var k = 0; k < ds.length; k++) {
+        var bit = 1 << ds[k];
+        rowM[r] |= bit; colM[c] |= bit; boxM[b] |= bit; g[pos] = ds[k] + 1;
+        if (rec(pos + 1)) return true;
+        rowM[r] &= ~bit; colM[c] &= ~bit; boxM[b] &= ~bit; g[pos] = 0;
+        if (nodes > limit) return false;
+      }
+      return false;
+    };
+    if (rec(0)) return g;
+  }
+  return null;
+}
+/* can the puzzle be finished with logic alone? (naked singles, optionally hidden singles) */
+function suSingles(N, br, bc, given, hidden) {
+  var U = suUnits(N, br, bc), g = given.slice(), ALL = (1 << N) - 1, i, rowM = [], colM = [], boxM = [], filled = 0;
+  for (i = 0; i < N; i++) { rowM.push(0); colM.push(0); boxM.push(0); }
+  var put = function (p, d) { var bit = 1 << (d - 1); g[p] = d; rowM[(p / N) | 0] |= bit; colM[p % N] |= bit; boxM[U.boxOf[p]] |= bit; filled++; };
+  for (i = 0; i < N * N; i++) if (g[i]) { var d0 = g[i]; g[i] = 0; put(i, d0); }
+  var prog = true;
+  while (prog && filled < N * N) {
+    prog = false;
+    for (i = 0; i < N * N; i++) if (!g[i]) {
+      var cand = ALL & ~(rowM[(i / N) | 0] | colM[i % N] | boxM[U.boxOf[i]]);
+      if (!cand) return false;
+      if ((cand & (cand - 1)) === 0) { put(i, Math.round(Math.log(cand) / Math.LN2) + 1); prog = true; }
+    }
+    if (!prog && hidden) {
+      for (var u = 0; u < U.units.length && !prog; u++) {
+        var cells = U.units[u];
+        for (var d = 1; d <= N && !prog; d++) {
+          var bit = 1 << (d - 1), cnt = 0, at = -1, has = false;
+          for (var k = 0; k < cells.length; k++) {
+            var p = cells[k];
+            if (g[p] === d) { has = true; break; }
+            if (!g[p] && !((rowM[(p / N) | 0] | colM[p % N] | boxM[U.boxOf[p]]) & bit)) { cnt++; at = p; }
+          }
+          if (!has && cnt === 1) { put(at, d); prog = true; }
+        }
+      }
+    }
+  }
+  return filled === N * N;
+}
+function suMake(cfg) {
+  var N = cfg.N, br = cfg.br, bc = cfg.bc;
+  for (var tries = 0; tries < 12; tries++) {
+    var sol = suFill(N, br, bc); if (!sol) continue;
+    var g = sol.slice(), cells = [], i, givens = N * N;
+    for (i = 0; i < N * N; i++) cells.push(i);
+    shuffle(cells);
+    for (i = 0; i < cells.length && givens > cfg.givens; i++) {                 /* symmetric pass */
+      var p = cells[i], q = N * N - 1 - p;
+      if (!g[p]) continue;
+      var a = g[p], b = g[q], rem = (p === q || !g[q]) ? 1 : 2;
+      g[p] = 0; g[q] = 0;
+      if (suSingles(N, br, bc, g, cfg.hidden)) givens -= rem; else { g[p] = a; g[q] = b; }
+    }
+    shuffle(cells);
+    for (i = 0; i < cells.length && givens > cfg.givens; i++) {                 /* single-cell pass */
+      var p2 = cells[i]; if (!g[p2]) continue;
+      var a2 = g[p2]; g[p2] = 0;
+      if (suSingles(N, br, bc, g, cfg.hidden)) givens--; else g[p2] = a2;
+    }
+    return { sol: sol, given: g, givens: givens };
+  }
+  return null;
+}
+
+function suInit(tier) {
+  var cfg = suCfg(tier), mk = suMake(cfg), N = cfg.N, n = N * N, i;
+  var cs = N === 4 ? 92 : (N === 6 ? 74 : 52), gw = cs * N;
+  SU = { tier: tier, cfg: cfg, N: N, br: cfg.br, bc: cfg.bc, U: suUnits(N, cfg.br, cfg.bc), sol: mk.sol, given: mk.given.slice(), val: mk.given.slice(), notes: [], hinted: [], conf: [], flash: [], unitDone: [],
+    sel: -1, noteMode: false, solved: false, t: 0, winT: 0, cs: cs, gx: 56 + (468 - gw) / 2, gy: 64 + (486 - gw) / 2, shake: 0, msg: '', msgT: 0, hints: 0, mood: 'idle' };
+  for (i = 0; i < n; i++) { SU.notes.push(0); SU.hinted.push(false); SU.conf.push(false); SU.flash.push(0); }
+  for (i = 0; i < SU.U.units.length; i++) SU.unitDone.push(false);
+  suRecalc(true);
+  for (i = 0; i < SU.U.units.length; i++) SU.unitDone[i] = suUnitOK(i);
+  /* pick a starting cell: first empty one */
+  for (i = 0; i < n; i++) if (!SU.val[i]) { SU.sel = i; break; }
+}
+function suUnitOK(u) {
+  var cells = SU.U.units[u], seen = 0;
+  for (var k = 0; k < cells.length; k++) { var v = SU.val[cells[k]]; if (!v || (seen & (1 << v))) return false; seen |= 1 << v; }
+  return true;
+}
+function suRecalc(silent) {
+  var N = SU.N, n = N * N, bad = 0, i;
+  for (i = 0; i < n; i++) {
+    var v = SU.val[i], c = false;
+    if (v) { var ps = SU.U.peers[i]; for (var k = 0; k < ps.length; k++) if (SU.val[ps[k]] === v) { c = true; break; } }
+    SU.conf[i] = c; if (c) bad++;
+  }
+  var full = true; for (i = 0; i < n; i++) if (!SU.val[i]) { full = false; break; }
+  SU.bad = bad;
+  if (full && !bad && !SU.solved && !silent) { SU.solved = true; SU.winT = 0; SU.sel = -1; sfx('win'); }
+}
+function suCheckUnits(cell) {
+  for (var u = 0; u < SU.U.units.length; u++) {
+    var cells = SU.U.units[u];
+    if (cells.indexOf(cell) < 0) { if (SU.unitDone[u] && !suUnitOK(u)) SU.unitDone[u] = false; continue; }
+    var ok = suUnitOK(u);
+    if (ok && !SU.unitDone[u]) { SU.unitDone[u] = true; for (var k = 0; k < cells.length; k++) SU.flash[cells[k]] = 0.7 + k * 0.05; sfx('good'); }
+    else if (!ok) SU.unitDone[u] = false;
+  }
+}
+function suSetDigit(d) {
+  var s = SU; if (s.solved || s.sel < 0 || s.given[s.sel]) return;
+  var i = s.sel;
+  if (s.noteMode) {
+    if (s.val[i]) return;
+    s.notes[i] ^= (1 << (d - 1)); sfx('click'); return;
+  }
+  if (s.val[i] === d) { s.val[i] = 0; sfx('erase'); suRecalc(); return; }
+  s.val[i] = d; s.notes[i] = 0; s.hinted[i] = false;
+  var ps = s.U.peers[i], bit = 1 << (d - 1);
+  for (var k = 0; k < ps.length; k++) s.notes[ps[k]] &= ~bit;
+  suRecalc();
+  if (s.conf[i]) { sfx('bad'); s.shake = 0.3; } else { sfx('num'); suCheckUnits(i); }
+  suRecalc();
+}
+function suErase() {
+  var s = SU; if (s.solved || s.sel < 0 || s.given[s.sel]) return;
+  if (s.val[s.sel] || s.notes[s.sel]) { s.val[s.sel] = 0; s.notes[s.sel] = 0; s.hinted[s.sel] = false; sfx('erase'); suRecalc(); }
+}
+function suHint() {
+  var s = SU; if (s.solved) return;
+  var i = -1, n = s.N * s.N;
+  if (s.sel >= 0 && !s.given[s.sel] && s.val[s.sel] !== s.sol[s.sel]) i = s.sel;
+  if (i < 0) { var c = []; for (var k = 0; k < n; k++) if (s.val[k] !== s.sol[k]) c.push(k); if (!c.length) return; i = pick(c); }
+  s.sel = i; s.val[i] = s.sol[i]; s.notes[i] = 0; s.hinted[i] = true; s.hints++;
+  var ps = s.U.peers[i], bit = 1 << (s.sol[i] - 1);
+  for (var q = 0; q < ps.length; q++) s.notes[ps[q]] &= ~bit;
+  sfx('good'); suRecalc(); suCheckUnits(i); suRecalc();
+  s.msg = 'Küçük bir ipucu!'; s.msgT = 1.6;
+}
+function suCount(d) { var c = 0; for (var i = 0; i < SU.val.length; i++) if (SU.val[i] === d) c++; return c; }
+
+function suStep(dt) {
+  var s = SU; s.t += dt; if (s.shake > 0) s.shake -= dt; if (s.msgT > 0) s.msgT -= dt;
+  for (var i = 0; i < s.flash.length; i++) if (s.flash[i] > 0) s.flash[i] -= dt;
+  if (s.solved) s.winT += dt;
+}
+function suCellAt(x, y) {
+  var s = SU, c = Math.floor((x - s.gx) / s.cs), r = Math.floor((y - s.gy) / s.cs);
+  if (c < 0 || r < 0 || c >= s.N || r >= s.N) return -1;
+  return r * s.N + c;
+}
+function suDown(x, y) {
+  if (SU.solved) return;
+  var c = suCellAt(x, y);
+  if (c >= 0) { SU.sel = c; sfx('click'); }
+}
+function suKey(code, key) {
+  var s = SU; if (s.solved) return false;
+  var N = s.N;
+  if (/^[1-9]$/.test(key) && +key <= N) { suSetDigit(+key); return true; }
+  if (code === 'Backspace' || code === 'Delete' || key === '0') { suErase(); return true; }
+  if (key === 'n' || key === 'N') { s.noteMode = !s.noteMode; sfx('click'); return true; }
+  if (key === 'h' || key === 'H') { suHint(); return true; }
+  var dr = 0, dc = 0;
+  if (code === 'ArrowUp') dr = -1; else if (code === 'ArrowDown') dr = 1; else if (code === 'ArrowLeft') dc = -1; else if (code === 'ArrowRight') dc = 1;
+  if (dr || dc) {
+    if (s.sel < 0) s.sel = 0;
+    else { var r = (s.sel / N) | 0, c = s.sel % N; r = (r + dr + N) % N; c = (c + dc + N) % N; s.sel = r * N + c; }
+    return true;
+  }
+  return false;
+}
+
+function suDraw() {
+  var s = SU, N = s.N, cs = s.cs, gx = s.gx, gy = s.gy, gw = cs * N, i, r, c;
+  var ox = s.shake > 0 ? Math.sin(s.t * 70) * 3 * (s.shake / 0.3) : 0;
+  ctx.save(); ctx.translate(ox, 0);
+  /* board */
+  rr(gx - 9, gy - 9 + 6, gw + 18, gw + 18, 16); ctx.fillStyle = INK; ctx.fill();
+  rr(gx - 9, gy - 9, gw + 18, gw + 18, 16); ctx.fillStyle = '#fffdf9'; ctx.fill();
+  var sc = s.sel >= 0 ? s.sel : -1, sr = sc >= 0 ? (sc / N) | 0 : -1, scc = sc >= 0 ? sc % N : -1, sv = sc >= 0 ? s.val[sc] : 0, sb = sc >= 0 ? s.U.boxOf[sc] : -1;
+  for (i = 0; i < N * N; i++) {
+    r = (i / N) | 0; c = i % N;
+    var x = gx + c * cs, y = gy + r * cs, fill = s.given[i] ? '#f4e6d2' : '#fffdf9';
+    if (sc >= 0 && (r === sr || c === scc || s.U.boxOf[i] === sb)) fill = s.given[i] ? '#ecd9b8' : '#fff1c7';
+    if (sv && s.val[i] === sv) fill = '#cfe5ff';
+    if (s.conf[i]) fill = '#ffc9c9';
+    if (i === sc) fill = '#ffd95e';
+    ctx.fillStyle = fill; ctx.fillRect(x, y, cs, cs);
+    if (s.flash[i] > 0 && s.flash[i] < 0.9) { ctx.fillStyle = 'rgba(110,215,140,' + Math.min(0.75, s.flash[i] * 1.1) + ')'; ctx.fillRect(x, y, cs, cs); }
+  }
+  /* win ripple */
+  if (s.solved) {
+    for (i = 0; i < N * N; i++) {
+      r = (i / N) | 0; c = i % N;
+      var ph = s.winT * 13 - (r + c);
+      if (ph > 0 && ph < 4) { ctx.fillStyle = LEGO[(r + c) % LEGO.length]; ctx.globalAlpha = 0.75 * (1 - ph / 4); ctx.fillRect(gx + c * cs, gy + r * cs, cs, cs); ctx.globalAlpha = 1; }
+    }
+  }
+  /* grid lines */
+  ctx.strokeStyle = 'rgba(43,31,26,.28)'; ctx.lineWidth = 1.5; ctx.beginPath();
+  for (i = 1; i < N; i++) { ctx.moveTo(gx + i * cs, gy); ctx.lineTo(gx + i * cs, gy + gw); ctx.moveTo(gx, gy + i * cs); ctx.lineTo(gx + gw, gy + i * cs); }
+  ctx.stroke();
+  ink(4); ctx.beginPath();
+  for (i = s.bc; i < N; i += s.bc) { ctx.moveTo(gx + i * cs, gy); ctx.lineTo(gx + i * cs, gy + gw); }
+  for (i = s.br; i < N; i += s.br) { ctx.moveTo(gx, gy + i * cs); ctx.lineTo(gx + gw, gy + i * cs); }
+  ctx.stroke();
+  /* digits and notes */
+  for (i = 0; i < N * N; i++) {
+    r = (i / N) | 0; c = i % N;
+    var cx = gx + c * cs + cs / 2, cy = gy + r * cs + cs / 2, v = s.val[i];
+    if (v) {
+      var col = s.conf[i] ? '#d62839' : (s.given[i] ? INK : (s.hinted[i] ? '#1f9d55' : '#2f6fd3'));
+      txt(String(v), cx, cy + 2, cs * 0.58, col, 'center', s.given[i] ? '900' : '800');
+    } else if (s.notes[i]) {
+      var ncols = N === 4 ? 2 : 3, nrows = N === 9 ? 3 : 2, nsz = cs * (N === 9 ? 0.21 : 0.23);
+      for (var d = 1; d <= N; d++) if (s.notes[i] & (1 << (d - 1))) {
+        var k = d - 1, nx = gx + c * cs + cs * ((k % ncols) + 0.5) / ncols, ny = gy + r * cs + cs * (Math.floor(k / ncols) + 0.5) / nrows;
+        txt(String(d), nx, ny + 1, nsz, '#8a7a6e', 'center', '800');
+      }
+    }
+  }
+  /* selection frame */
+  if (sc >= 0) { var sx = gx + scc * cs, sy = gy + sr * cs; rr(sx + 1, sy + 1, cs - 2, cs - 2, 5); ctx.lineWidth = 4; ctx.strokeStyle = '#e8590c'; ctx.stroke(); }
+  /* outer frame */
+  rr(gx - 2, gy - 2, gw + 4, gw + 4, 8); ink(5); ctx.stroke();
+  ctx.restore();
+
+  /* ---- right panel: number pad + tools + the couple ---- */
+  var px = 566, pw = 312;
+  panel(px, 74, pw, 452, '#fffaf2');
+  txt('Sayılar', px + pw / 2, 97, 16, INK, 'center', '900');
+  var cols2 = N === 4 ? 2 : 3, rows2 = Math.ceil(N / cols2), bw = N === 4 ? 112 : (N === 6 ? 88 : 82), bh = N === 4 ? 80 : (N === 6 ? 72 : 58), gap = N === 9 ? 8 : 10;
+  var tw = cols2 * bw + (cols2 - 1) * gap, tx0 = px + (pw - tw) / 2, ty0 = 114;
+  for (i = 1; i <= N; i++) {
+    var rr0 = Math.floor((i - 1) / cols2), cc0 = (i - 1) % cols2, done = suCount(i) >= N;
+    var bx = tx0 + cc0 * (bw + gap), by = ty0 + rr0 * (bh + gap);
+    if (btn(bx, by, bw, bh, '', { disabled: s.solved, fill: done ? '#ece3d6' : (s.noteMode ? '#fff0f5' : '#fff'), draw: (function (dd, dn) { return function (cx, cy) {
+      txt(String(dd), cx, cy + 1, N === 9 ? 30 : 34, dn ? 'rgba(47,111,211,.35)' : (s.noteMode ? '#d6336c' : '#2f6fd3'), 'center', '900');
+      txt('×' + Math.max(0, N - suCount(dd)), cx + bw / 2 - 10, cy + bh / 2 - 11, 11, 'rgba(43,31,26,.45)', 'right', '800');
+    }; })(i, done) })) suSetDigit(i);
+  }
+  var ty1 = ty0 + rows2 * (bh + gap) + 2, tb = 96;
+  if (btn(px + 8, ty1, tb, 48, 'Sil', { size: 15, disabled: s.solved })) suErase();
+  if (btn(px + 8 + tb + 6, ty1, tb, 48, s.noteMode ? 'Not: AÇIK' : 'Not', { size: 14, fill: s.noteMode ? '#ffd1e1' : '#fff', disabled: s.solved })) { s.noteMode = !s.noteMode; }
+  if (btn(px + 8 + 2 * (tb + 6), ty1, tb, 48, 'İpucu', { size: 15, fill: '#e3f4ff', disabled: s.solved })) suHint();
+  /* the couple, watching */
+  var happy = s.solved, worried = s.bad > 0 && !s.solved;
+  drawYunus(px + 96, 518, 1.2, { happy: happy || !worried, worried: worried, cheer: happy, t: s.t });
+  drawSevval(px + 190, 518, 1.2, { happy: happy || !worried, cheer: happy, t: s.t });
+  var msg = s.msgT > 0 ? s.msg : (happy ? 'Başardık!' : (worried ? 'Kırmızı bir çakışma var…' : (N === 9 ? 'Her satır, sütun ve kutuda 1–9!' : 'Her satır, sütun ve kutuda bir kez!')));
+  bubble(px + 24, Math.max(ty1 + 62, 396), pw - 48, 40, msg, px + 110, { size: 13, tail: 10 });
+}
+function suRules() {
+  var N = SU.N, rng = '1–' + N;
+  return ['Her satırda, her sütunda ve her kalın çizgili kutuda ' + rng + ' arası sayılar birer kez bulunmalı.',
+    'Bir kutuya tıkla, sonra sağdaki tuşlardan ya da klavyeden sayıyı yaz.',
+    'Kırmızı olan sayılar çakışıyor demektir. “Not” ile minik tahminler yazabilirsin; “İpucu” tıkandığında yardım eder.'];
+}
+
+/* =====================================================================
+   04 · BLOCKS — a block-blast style puzzle on an 8×8 baseplate
+   drag pieces onto the board, full rows/columns vanish, clear enough lines
+   ===================================================================== */
+var BL = null;
+var BL_N = 8, BL_GX = 56, BL_GY = 91, BL_CS = 54;
+var BL_SLOTS = [{ x: 540, y: 190, w: 340, h: 82 }, { x: 540, y: 278, w: 340, h: 82 }, { x: 540, y: 366, w: 340, h: 82 }];
+var BL_SH = {
+  d1: ['#'], h2: ['##'], v2: ['#', '#'], h3: ['###'], v3: ['#', '#', '#'], h4: ['####'], v4: ['#', '#', '#', '#'],
+  h5: ['#####'], v5: ['#', '#', '#', '#', '#'], sq2: ['##', '##'], sq3: ['###', '###', '###'], r23: ['###', '###'], r32: ['##', '##', '##'],
+  c1: ['##', '#.'], c2: ['##', '.#'], c3: ['#.', '##'], c4: ['.#', '##'],
+  bl1: ['###', '#..', '#..'], bl2: ['###', '..#', '..#'], bl3: ['#..', '#..', '###'], bl4: ['..#', '..#', '###'],
+  l1: ['#.', '#.', '##'], l2: ['.#', '.#', '##'], l3: ['##', '#.', '#.'], l4: ['##', '.#', '.#'],
+  l5: ['###', '#..'], l6: ['###', '..#'], l7: ['#..', '###'], l8: ['..#', '###'],
+  t1: ['###', '.#.'], t2: ['.#.', '###'], t3: ['#.', '##', '#.'], t4: ['.#', '##', '.#'],
+  s1: ['.##', '##.'], z1: ['##.', '.##'], s2: ['#.', '##', '.#'], z2: ['.#', '##', '#.']
+};
+var BL_DEF = {};
+(function () {
+  for (var k in BL_SH) {
+    var rows = BL_SH[k], cells = [];
+    for (var y = 0; y < rows.length; y++) for (var x = 0; x < rows[y].length; x++) if (rows[y][x] === '#') cells.push([x, y]);
+    BL_DEF[k] = { name: k, cells: cells, w: rows[0].length, h: rows.length, n: cells.length };
+  }
+})();
+var BL_POOL0 = ['d1', 'h2', 'v2', 'h3', 'v3', 'sq2', 'c1', 'c2', 'c3', 'c4'];
+var BL_POOL1 = BL_POOL0.concat(['h4', 'v4', 'r23', 'r32', 'l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8', 't1', 't2', 't3', 't4']);
+var BL_POOL2 = BL_POOL1.concat(['s1', 'z1', 's2', 'z2', 'h5', 'v5']);
+var BL_POOL3 = BL_POOL2.concat(['sq3', 'bl1', 'bl2', 'bl3', 'bl4']);
+var BL_OBST = [0, 0, 0, 3, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 12, 12];
+var BL_GOAL = [2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 11];
+
+function blWeight(name, pi) {
+  if (name === 'd1') return [1.1, 0.45, 0.3, 0.25][pi];
+  if (name === 'h2' || name === 'v2') return [1.2, 0.8, 0.6, 0.5][pi];
+  if (name === 'sq3' || name === 'h5' || name === 'v5' || name.charAt(0) === 'b') return 0.7;
+  return 1;
+}
+function blPoolIdx(tier) { return tier < 2 ? 0 : (tier < 5 ? 1 : (tier < 10 ? 2 : 3)); }
+/* ---------- pure logic ---------- */
+function blCanPlace(board, def, x, y) {
+  for (var k = 0; k < def.cells.length; k++) {
+    var cx = x + def.cells[k][0], cy = y + def.cells[k][1];
+    if (cx < 0 || cy < 0 || cx >= BL_N || cy >= BL_N || board[cy * BL_N + cx]) return false;
+  }
+  return true;
+}
+function blAnyPlace(board, def) {
+  for (var y = 0; y <= BL_N - def.h; y++) for (var x = 0; x <= BL_N - def.w; x++) if (blCanPlace(board, def, x, y)) return true;
+  return false;
+}
+function blFullLines(board) {
+  var rows = [], cols = [], r, c, f;
+  for (r = 0; r < BL_N; r++) { f = true; for (c = 0; c < BL_N; c++) if (!board[r * BL_N + c]) { f = false; break; } if (f) rows.push(r); }
+  for (c = 0; c < BL_N; c++) { f = true; for (r = 0; r < BL_N; r++) if (!board[r * BL_N + c]) { f = false; break; } if (f) cols.push(c); }
+  return { rows: rows, cols: cols };
+}
+function blApply(board, def, x, y, col) {
+  var nb = board.slice(), k, i;
+  for (k = 0; k < def.cells.length; k++) nb[(y + def.cells[k][1]) * BL_N + x + def.cells[k][0]] = col;
+  var L = blFullLines(nb), mark = {}, cleared = [];
+  for (i = 0; i < L.rows.length; i++) for (k = 0; k < BL_N; k++) mark[L.rows[i] * BL_N + k] = 1;
+  for (i = 0; i < L.cols.length; i++) for (k = 0; k < BL_N; k++) mark[k * BL_N + L.cols[i]] = 1;
+  for (var p in mark) { cleared.push([p % BL_N, (p / BL_N) | 0, nb[p]]); nb[p] = 0; }
+  return { board: nb, lines: L.rows.length + L.cols.length, rows: L.rows, cols: L.cols, cleared: cleared };
+}
+function blBatchOK(board, defs) {
+  var budget = 5000, perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  var rec = function (b, order, idx) {
+    if (idx === defs.length) return true;
+    if (--budget < 0) return true;
+    var d = defs[order[idx]];
+    for (var y = 0; y <= BL_N - d.h; y++) for (var x = 0; x <= BL_N - d.w; x++) if (blCanPlace(b, d, x, y)) {
+      var r = blApply(b, d, x, y, 1);
+      if (rec(r.board, order, idx + 1)) return true;
+      if (budget < 0) return true;
+    }
+    return false;
+  };
+  for (var p = 0; p < perms.length; p++) if (rec(board, perms[p], 0)) return true;
+  return false;
+}
+/* how healthy is a board? (used to deal fair, helpful pieces) */
+function blHoles(b) {
+  var h = 0, x, y, f;
+  for (y = 0; y < BL_N; y++) for (x = 0; x < BL_N; x++) if (!b[y * BL_N + x]) {
+    f = 0;
+    if (x === 0 || b[y * BL_N + x - 1]) f++;
+    if (x === BL_N - 1 || b[y * BL_N + x + 1]) f++;
+    if (y === 0 || b[(y - 1) * BL_N + x]) f++;
+    if (y === BL_N - 1 || b[(y + 1) * BL_N + x]) f++;
+    if (f >= 3) h++;
+  }
+  return h;
+}
+function blFilled(b) { var c = 0; for (var i = 0; i < b.length; i++) if (b[i]) c++; return c; }
+function blEval(b, lines) { return lines * 100 - blHoles(b) * 6 - blFilled(b) * 1.2; }
+/* best greedy outcome of dealing these three: -1e6 if they cannot all be placed */
+function blBatchScore(board, defs) {
+  var perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]], best = -1e6;
+  for (var pi = 0; pi < perms.length; pi++) {
+    var b = board, tot = 0, ok = true;
+    for (var k = 0; k < 3 && ok; k++) {
+      var d = defs[perms[pi][k]], bs = -1e9, br = null;
+      for (var y = 0; y <= BL_N - d.h; y++) for (var x = 0; x <= BL_N - d.w; x++) if (blCanPlace(b, d, x, y)) {
+        var r = blApply(b, d, x, y, 1), sc = blEval(r.board, r.lines);
+        if (sc > bs) { bs = sc; br = r; }
+      }
+      if (!br) ok = false; else { b = br.board; tot += br.lines; }
+    }
+    if (ok) { var v = blEval(b, tot); if (v > best) best = v; }
+  }
+  return best;
+}
+function blDeal() {
+  var cands = [], i, n = blFilled(BL.board), crowd = clamp((n / 64 - 0.35) * 3, 0, 1);
+  var pool = [BL_POOL0, BL_POOL1, BL_POOL2, BL_POOL3][BL.pool];
+  var pickOne = function () {
+    var tot = 0, ws = [], j;
+    for (j = 0; j < pool.length; j++) { var w = blWeight(pool[j], BL.pool) * Math.exp(-(BL_DEF[pool[j]].n - 3) * crowd * 0.9); ws.push(w); tot += w; }
+    var r = Math.random() * tot;
+    for (j = 0; j < pool.length; j++) { r -= ws[j]; if (r <= 0) return pool[j]; }
+    return pool[0];
+  };
+  for (i = 0; i < 9; i++) {
+    var defs = [BL_DEF[pickOne()], BL_DEF[pickOne()], BL_DEF[pickOne()]], sc = blBatchScore(BL.board, defs);
+    if (sc > -1e5) cands.push({ defs: defs, sc: sc });
+  }
+  var chosen;
+  if (!cands.length) chosen = shuffle([BL_DEF.d1, BL_DEF.h2, BL_DEF.v2]);
+  else {
+    cands.sort(function (a, b) { return b.sc - a.sc; });
+    var top = BL.tier <= 2 ? 1 : (BL.tier <= 7 ? 2 : 3);
+    chosen = cands[Math.floor(Math.random() * Math.min(top, cands.length))].defs;
+  }
+  var cols = shuffle([0, 1, 2, 3, 4, 5, 6]);
+  BL.tray = [];
+  for (i = 0; i < 3; i++) BL.tray.push({ def: chosen[i], col: cols[i] + 1 });
+}
+function blMakeStart(tier) {
+  var board = [], i, n = BL_OBST[tier];
+  for (i = 0; i < BL_N * BL_N; i++) board.push(0);
+  var tries = 0, put = 0;
+  while (put < n && tries < 500) {
+    tries++;
+    var p = rndi(0, BL_N * BL_N - 1);
+    if (board[p]) continue;
+    board[p] = rndi(1, 7);
+    var L = blFullLines(board), rowCount = 0, colCount = 0, r = (p / BL_N) | 0, c = p % BL_N, k;
+    for (k = 0; k < BL_N; k++) { if (board[r * BL_N + k]) rowCount++; if (board[k * BL_N + c]) colCount++; }
+    if (L.rows.length || L.cols.length || rowCount > 4 || colCount > 4) { board[p] = 0; continue; }
+    put++;
+  }
+  return board;
+}
+function blInit(tier) {
+  var start = blMakeStart(tier);
+  BL = { tier: tier, pool: blPoolIdx(tier), goal: BL_GOAL[tier], lines: 0, start: start, board: start.slice(), tray: [], snaps: [], drag: null, ret: null, fx: [], pops: [],
+    solved: false, stuck: false, stuckT: 0, winT: 0, t: 0, moves: 0, mood: 0, moodT: 0, hover: null };
+  blDeal();
+}
+function blRestart() {
+  BL.board = BL.start.slice(); BL.lines = 0; BL.snaps = []; BL.drag = null; BL.ret = null; BL.fx = []; BL.stuck = false; BL.solved = false; BL.moves = 0;
+  blDeal(); sfx('click');
+}
+function blUndo() {
+  if (!BL.snaps.length || BL.solved) return;
+  var s = BL.snaps.pop();
+  BL.board = s.board; BL.tray = s.tray; BL.lines = s.lines; BL.moves = s.moves; BL.stuck = false; BL.drag = null; BL.ret = null; BL.fx = [];
+  sfx('erase');
+}
+function blCheckStuck() {
+  var any = false;
+  for (var i = 0; i < BL.tray.length; i++) if (BL.tray[i] && blAnyPlace(BL.board, BL.tray[i].def)) { any = true; break; }
+  if (!any) { BL.stuck = true; BL.stuckT = 0; sfx('bad'); }
+}
+/* the one place where a piece actually lands */
+function blPlace(slot, x, y) {
+  var p = BL.tray[slot];
+  if (!p || BL.solved || BL.stuck || !blCanPlace(BL.board, p.def, x, y)) return false;
+  BL.snaps.push({ board: BL.board.slice(), tray: BL.tray.slice(), lines: BL.lines, moves: BL.moves });
+  var r = blApply(BL.board, p.def, x, y, p.col);
+  BL.board = r.board; BL.tray[slot] = null; BL.moves++;
+  BL.lines += r.lines;
+  sfx('drop');
+  if (r.lines) {
+    for (var i = 0; i < r.cleared.length; i++) {
+      var c = r.cleared[i], d = (Math.abs(c[0] - (x + p.def.w / 2)) + Math.abs(c[1] - (y + p.def.h / 2))) * 0.03;
+      BL.fx.push({ x: c[0], y: c[1], col: c[2], t: -d });
+    }
+    var cx = BL_GX + BL_CS * BL_N / 2, cy = BL_GY + BL_CS * BL_N / 2;
+    BL.pops.push({ x: cx, y: cy, t: 0, text: r.lines === 1 ? 'Güzel! +1' : (r.lines === 2 ? 'İki çizgi! +2' : (r.lines === 3 ? 'Üç çizgi! +3' : 'Muhteşem! +' + r.lines)), big: r.lines });
+    setTimeout(function () { sfx('clear'); }, 90);
+    BL.mood = 2; BL.moodT = 1.2;
+  }
+  if (BL.lines >= BL.goal) { BL.solved = true; BL.winT = 0; BL.drag = null; setTimeout(function () { sfx('win'); }, 350); return true; }
+  var left = false; for (var k = 0; k < 3; k++) if (BL.tray[k]) left = true;
+  if (!left) blDeal();
+  blCheckStuck();
+  return true;
+}
+
+/* ---------- geometry / input ---------- */
+function blTrayScale(def, slot) {
+  var s = BL_SLOTS[slot];
+  return Math.min(30, (s.w - 40) / def.w, (s.h - 16) / def.h);
+}
+function blDragCenter() { return { x: BL.drag.x, y: BL.drag.y - 36 }; }
+function blTarget() {
+  if (!BL.drag) return null;
+  var p = BL.tray[BL.drag.slot]; if (!p) return null;
+  var c = blDragCenter(), fx = (c.x - BL_GX) / BL_CS - p.def.w / 2, fy = (c.y - BL_GY) / BL_CS - p.def.h / 2;
+  var rx = Math.round(fx), ry = Math.round(fy), best = null, bd = 99;
+  for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+    var x = rx + dx, y = ry + dy;
+    if (!blCanPlace(BL.board, p.def, x, y)) continue;
+    var d = Math.hypot(fx - x, fy - y);
+    if (d < bd) { bd = d; best = { x: x, y: y }; }
+  }
+  return bd <= 0.95 ? best : null;
+}
+function blDown(x, y) {
+  if (BL.solved || BL.stuck) return;
+  for (var i = 0; i < 3; i++) {
+    var s = BL_SLOTS[i];
+    if (BL.tray[i] && inR(x, y, s.x, s.y, s.w, s.h)) { BL.drag = { slot: i, x: x, y: y, k: 0 }; sfx('pop'); return; }
+  }
+}
+function blMove(x, y) { if (BL.drag) { BL.drag.x = x; BL.drag.y = y; } }
+function blUp(x, y) {
+  if (!BL.drag) return;
+  BL.drag.x = x; BL.drag.y = y;
+  var slot = BL.drag.slot, t = blTarget(), d = BL.drag;
+  BL.drag = null;
+  if (t && blPlace(slot, t.x, t.y)) return;
+  BL.ret = { slot: slot, x: d.x, y: d.y - 36, k: d.k, t: 0 };
+  if (inR(x, y, BL_GX, BL_GY, BL_CS * BL_N, BL_CS * BL_N)) sfx('bad');
+}
+function blKey(code, key) {
+  if (key === 'z' || key === 'Z' || (code === 'Backspace')) { blUndo(); return true; }
+  return false;
+}
+function blStep(dt) {
+  var b = BL; b.t += dt;
+  if (b.drag) b.drag.k = Math.min(1, b.drag.k + dt * 9);
+  if (b.ret) { b.ret.t += dt; if (b.ret.t > 0.16) b.ret = null; }
+  for (var i = b.fx.length - 1; i >= 0; i--) {
+    var f = b.fx[i], was = f.t; f.t += dt;
+    if (was < 0 && f.t >= 0) burst(BL_GX + (f.x + 0.5) * BL_CS, BL_GY + (f.y + 0.5) * BL_CS, 4, [LEGO[f.col - 1] || '#fff', '#fff'], { minSp: 60, maxSp: 200, up: 80, minSize: 3, maxSize: 6, minLife: 0.4, maxLife: 0.8 });
+    if (f.t > 0.4) b.fx.splice(i, 1);
+  }
+  for (var j = b.pops.length - 1; j >= 0; j--) { b.pops[j].t += dt; if (b.pops[j].t > 1.3) b.pops.splice(j, 1); }
+  if (b.moodT > 0) b.moodT -= dt;
+  if (b.stuck) b.stuckT += dt;
+  if (b.solved) { b.winT += dt; if (Math.random() < dt * 14) burst(rnd(60, 500), rnd(100, 300), 8, LEGO, { up: 160, minSp: 50, maxSp: 240 }); }
+}
+
+/* ---------- drawing ---------- */
+function blPiece(def, col, x, y, cs, alpha) {
+  var c = LEGO[col - 1] || LEGO[0];
+  if (alpha !== undefined) ctx.globalAlpha = alpha;
+  for (var k = 0; k < def.cells.length; k++) brickRect(x + def.cells[k][0] * cs, y + def.cells[k][1] * cs, 1, 1, cs, c);
+  ctx.globalAlpha = 1;
+}
+function blDraw() {
+  var b = BL, N = BL_N, cs = BL_CS, gx = BL_GX, gy = BL_GY, bw = cs * N, i, x, y;
+  /* board */
+  rr(gx - 10, gy - 10 + 6, bw + 20, bw + 20, 16); ctx.fillStyle = INK; ctx.fill();
+  rr(gx - 10, gy - 10, bw + 20, bw + 20, 16); ctx.fillStyle = '#cfe9d8'; ctx.fill();
+  for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
+    var px = gx + x * cs, py = gy + y * cs;
+    rr(px + 2, py + 2, cs - 4, cs - 4, 8); ctx.fillStyle = ((x + y) & 1) ? '#bfe0cb' : '#c8e6d2'; ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.arc(px + cs / 2, py + cs / 2, cs * 0.17, 0, 6.2832); ctx.fill();
+  }
+  /* placement preview */
+  var tgt = b.drag ? blTarget() : null, pv = null, hl = {};
+  if (tgt) {
+    var pc = b.tray[b.drag.slot];
+    pv = blApply(b.board, pc.def, tgt.x, tgt.y, pc.col);
+    for (i = 0; i < pv.rows.length; i++) for (x = 0; x < N; x++) hl[pv.rows[i] * N + x] = 1;
+    for (i = 0; i < pv.cols.length; i++) for (y = 0; y < N; y++) hl[y * N + pv.cols[i]] = 1;
+  }
+  /* bricks on the board */
+  for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
+    var v = b.board[y * N + x];
+    if (v) brickRect(gx + x * cs, gy + y * cs, 1, 1, cs, LEGO[v - 1]);
+  }
+  /* cells that will vanish glow */
+  if (tgt) {
+    var pulse = 0.35 + 0.25 * Math.sin(b.t * 12);
+    for (var key in hl) { var hx = key % N, hy = (key / N) | 0; rr(gx + hx * cs + 2, gy + hy * cs + 2, cs - 4, cs - 4, 8); ctx.fillStyle = 'rgba(255,255,255,' + pulse + ')'; ctx.fill(); }
+    var pc2 = b.tray[b.drag.slot]; ctx.globalAlpha = 0.55; blPiece(pc2.def, pc2.col, gx + tgt.x * cs, gy + tgt.y * cs, cs); ctx.globalAlpha = 1;
+  }
+  /* clearing cells */
+  for (i = 0; i < b.fx.length; i++) {
+    var f = b.fx[i]; if (f.t < 0) continue;
+    var u = f.t / 0.4, s2 = 1 - u * 0.7;
+    ctx.save(); ctx.globalAlpha = 1 - u; ctx.translate(gx + (f.x + 0.5) * cs, gy + (f.y + 0.5) * cs); ctx.scale(s2 * (1 + 0.2 * (1 - u)), s2 * (1 + 0.2 * (1 - u)));
+    rr(-cs / 2 + 2, -cs / 2 + 2, cs - 4, cs - 4, 8); ctx.fillStyle = u < 0.35 ? '#fff' : LEGO[f.col - 1]; ctx.fill(); ink(3); ctx.stroke();
+    ctx.restore();
+  }
+  rr(gx - 10, gy - 10, bw + 20, bw + 20, 16); ink(4.5); ctx.stroke();
+
+  /* ---- right side ---- */
+  var px0 = 540;
+  panel(px0, 74, 340, 100, '#fffaf2');
+  txt('Hedef', px0 + 18, 96, 13, 'rgba(43,31,26,.5)', 'left', '900');
+  txt(b.goal + ' çizgi temizle', px0 + 18, 120, 22, INK, 'left', '900');
+  bar(px0 + 18, 140, 160, 18, b.lines / b.goal, '#4FB06A');
+  txt(Math.min(b.lines, b.goal) + ' / ' + b.goal, px0 + 18 + 160 + 10, 149, 14, INK, 'left', '900');
+  var mood = b.solved || b.moodT > 0;
+  drawYunus(px0 + 262, 164, 0.82, { happy: true, cheer: mood, t: b.t });
+  drawSevval(px0 + 308, 164, 0.82, { happy: true, cheer: mood, t: b.t });
+  for (i = 0; i < 3; i++) {
+    var sl = BL_SLOTS[i], p = b.tray[i];
+    var dragging = b.drag && b.drag.slot === i;
+    rr(sl.x, sl.y + 4, sl.w, sl.h, 14); ctx.fillStyle = INK; ctx.fill();
+    rr(sl.x, sl.y, sl.w, sl.h, 14); ctx.fillStyle = p ? '#fffaf2' : '#efe3d3'; ctx.fill(); ink(3.5); ctx.stroke();
+    if (p && !dragging && !(b.ret && b.ret.slot === i)) {
+      var tcs = blTrayScale(p.def, i), pw = p.def.w * tcs, ph = p.def.h * tcs;
+      var fits = blAnyPlace(b.board, p.def);
+      blPiece(p.def, p.col, sl.x + (sl.w - pw) / 2, sl.y + (sl.h - ph) / 2, tcs, fits ? 1 : 0.35);
+    } else if (p && dragging) {
+      ctx.fillStyle = 'rgba(43,31,26,.08)'; rr(sl.x + 6, sl.y + 6, sl.w - 12, sl.h - 12, 10); ctx.fill();
+    }
+  }
+  var ub = b.snaps.length > 0 && !b.solved;
+  if (btn(px0, 462, 160, 50, 'Geri al  (Z)', { size: 15, disabled: !ub, fill: '#e3f4ff' })) blUndo();
+  if (btn(px0 + 180, 462, 160, 50, 'Baştan', { size: 15, disabled: b.solved })) blRestart();
+  /* piece in hand */
+  if (b.drag) {
+    var dp = b.tray[b.drag.slot];
+    if (dp) {
+      var cc = blDragCenter(), k = easeOutCubic(b.drag.k), tc = blTrayScale(dp.def, b.drag.slot), dcs = lerp(tc, cs, k);
+      ctx.globalAlpha = 0.22; blPiece(dp.def, dp.col, cc.x - dp.def.w * dcs / 2 + 5, cc.y - dp.def.h * dcs / 2 + 9, dcs); ctx.globalAlpha = 1;
+      blPiece(dp.def, dp.col, cc.x - dp.def.w * dcs / 2, cc.y - dp.def.h * dcs / 2, dcs);
+    }
+  }
+  if (b.ret) {
+    var rp = b.tray[b.ret.slot];
+    if (rp) {
+      var sl2 = BL_SLOTS[b.ret.slot], tc2 = blTrayScale(rp.def, b.ret.slot), u2 = easeOutCubic(b.ret.t / 0.16);
+      var tx2 = sl2.x + sl2.w / 2, ty2 = sl2.y + sl2.h / 2, cs2 = lerp(lerp(tc2, cs, easeOutCubic(b.ret.k)), tc2, u2);
+      var cx2 = lerp(b.ret.x, tx2, u2), cy2 = lerp(b.ret.y, ty2, u2);
+      blPiece(rp.def, rp.col, cx2 - rp.def.w * cs2 / 2, cy2 - rp.def.h * cs2 / 2, cs2);
+    }
+  }
+  /* pop-up texts */
+  for (i = 0; i < b.pops.length; i++) {
+    var po = b.pops[i], a = clamp(1 - (po.t - 0.7) / 0.6, 0, 1), sc = easeOutBack(po.t / 0.3) * (1 + Math.min(po.big, 4) * 0.08);
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(po.x, po.y - po.t * 34); ctx.scale(sc, sc);
+    txtO(po.text, 0, 0, 34, '#fff', INK, 8); ctx.restore(); ctx.globalAlpha = 1;
+  }
+  /* stuck banner */
+  if (b.stuck) {
+    var u3 = easeOutBack(b.stuckT / 0.35);
+    ctx.save(); ctx.translate(gx + bw / 2, gy + bw / 2); ctx.scale(u3, u3);
+    panel(-175, -52, 350, 104, '#fff');
+    txt('Yer kalmadı!', 0, -20, 26, '#d62839', 'center', '900');
+    txt('Sağdan “Geri al” de ya da “Baştan” başla', 0, 16, 14, INK, 'center', '800');
+    ctx.restore();
+  }
+}
+function blRules() {
+  return ['Sağdaki parçaları tutup tahtaya sürükle, bırak.', 'Tamamen dolan satır ya da sütun silinir. Hedef kadar çizgi temizle.',
+    'Parçalar döndürülemez. Sıkışırsan “Geri al” ile hamleni geri alabilir ya da “Baştan” diyebilirsin.'];
+}
+
+/* =====================================================================
+   05 · WEND — swipe adjacent letters to spell the hidden words.
+   Every letter is used exactly once (like LinkedIn's Wend). English words,
+   English clues, Turkish meanings revealed once a word is found.
+   ===================================================================== */
+var WE = null;
+/* size = [rows, cols]; words = [WORD, clue, Turkish] ; sum of lengths = rows*cols */
+var WE_SETS = [
+  { theme: 'Hayvanlar', size: [3, 3], words: [['CAT', 'A small pet that purrs', 'kedi'], ['DOG', 'A loyal pet that barks', 'köpek'], ['COW', 'A farm animal that gives milk', 'inek']] },
+  { theme: 'Meyveler', size: [3, 4], words: [['PEAR', 'A juicy fruit, narrow at the top', 'armut'], ['PLUM', 'A small purple fruit with a stone', 'erik'], ['LIME', 'A small, sour, green citrus fruit', 'misket limonu']] },
+  { theme: 'Renkler', size: [4, 4], words: [['RED', 'The color of a ripe tomato', 'kırmızı'], ['BLUE', 'The color of a clear sky', 'mavi'], ['PINK', 'The color of cotton candy', 'pembe'], ['GREEN', 'The color of fresh grass', 'yeşil']] },
+  { theme: 'Mutfak', size: [4, 4], words: [['CUP', 'You drink tea from it', 'fincan'], ['PAN', 'You fry eggs in it', 'tava'], ['SPOON', 'You eat soup with it', 'kaşık'], ['PLATE', 'A flat dish for your food', 'tabak']] },
+  { theme: 'Hava Durumu', size: [4, 4], words: [['CLOUD', 'White and fluffy, floats in the sky', 'bulut'], ['STORM', 'Strong wind, heavy rain and thunder', 'fırtına'], ['BREEZE', 'A gentle, cool wind', 'esinti']] },
+  { theme: 'Seyahat', size: [4, 5], words: [['TAXI', 'A car you pay to ride in', 'taksi'], ['TRAIN', 'It runs on rails', 'tren'], ['PLANE', 'It flies passengers through the sky', 'uçak'], ['TICKET', 'You need it to board a train or plane', 'bilet']] },
+  { theme: 'Kedi Şeyleri', size: [4, 5], words: [['PAW', 'A cat’s foot', 'pati'], ['FISH', 'Cats love to eat it', 'balık'], ['MILK', 'A white drink for kittens', 'süt'], ['PURR', 'The happy sound a cat makes', 'mırlamak'], ['CLAWS', 'Sharp nails on a cat’s paws', 'pençeler']] },
+  { theme: 'Uzay', size: [5, 5], words: [['MOON', 'It circles the Earth and glows at night', 'ay'], ['EARTH', 'The planet we live on', 'dünya'], ['COMET', 'An icy space rock with a glowing tail', 'kuyruklu yıldız'], ['ORBIT', 'The path of a planet around the sun', 'yörünge'], ['ROCKET', 'It carries astronauts into space', 'roket']] },
+  { theme: 'Plaj', size: [5, 5], words: [['SUN', 'It shines in the sky all day', 'güneş'], ['SHELL', 'Found on the sand; a crab lives in one', 'deniz kabuğu'], ['TOWEL', 'You dry yourself with it after swimming', 'havlu'], ['BUCKET', 'Kids fill it with sand', 'kova'], ['ISLAND', 'Land surrounded by water', 'ada']] },
+  { theme: 'Müzik', size: [5, 5], words: [['PIANO', 'An instrument with black and white keys', 'piyano'], ['GUITAR', 'A string instrument you strum', 'gitar'], ['TRUMPET', 'A brass instrument you blow into', 'trompet'], ['CONCERT', 'A live music show', 'konser']] },
+  { theme: 'Okul', size: [5, 6], words: [['BOOK', 'You read it', 'kitap'], ['CLASS', 'A group of students taught together', 'sınıf'], ['PENCIL', 'You write with it and can erase it', 'kurşun kalem'], ['TEACHER', 'A person who helps you learn', 'öğretmen'], ['HOMEWORK', 'Schoolwork you do at home', 'ev ödevi']] },
+  { theme: 'Yemek', size: [5, 6], words: [['RICE', 'Small white grains, often served with chicken', 'pirinç'], ['SOUP', 'A hot liquid dish eaten with a spoon', 'çorba'], ['PASTA', 'Italian food; spaghetti is one kind', 'makarna'], ['BREAD', 'Baked from flour; you make toast from it', 'ekmek'], ['CHEESE', 'Made from milk; mice love it', 'peynir'], ['TOMATO', 'A round red fruit used in salads', 'domates']] },
+  { theme: 'Doğa', size: [5, 6], words: [['RIVER', 'Flowing water that runs to the sea', 'nehir'], ['STONE', 'A small piece of rock', 'taş'], ['FOREST', 'A large area covered with trees', 'orman'], ['SUNRISE', 'When the sun comes up in the morning', 'gün doğumu'], ['RAINBOW', 'A colorful arc after the rain', 'gökkuşağı']] },
+  { theme: 'Meslekler', size: [6, 6], words: [['CHEF', 'Cooks food in a restaurant', 'aşçı'], ['NURSE', 'Cares for patients in a hospital', 'hemşire'], ['DOCTOR', 'Treats sick people', 'doktor'], ['FARMER', 'Grows crops and keeps animals', 'çiftçi'], ['DENTIST', 'Takes care of your teeth', 'diş hekimi'], ['ENGINEER', 'Designs bridges, machines or software', 'mühendis']] },
+  { theme: 'Ev', size: [6, 6], words: [['WINDOW', 'You look outside through it', 'pencere'], ['KITCHEN', 'The room where food is cooked', 'mutfak'], ['BEDROOM', 'The room where you sleep', 'yatak odası'], ['BATHROOM', 'The room with a shower or a bathtub', 'banyo'], ['CUPBOARD', 'A cabinet for storing dishes and food', 'dolap']] },
+  { theme: 'Vahşi Hayvanlar', size: [6, 6], words: [['ZEBRA', 'A striped African animal, like a horse', 'zebra'], ['TIGER', 'A big cat with orange and black stripes', 'kaplan'], ['MONKEY', 'It climbs trees and loves bananas', 'maymun'], ['RABBIT', 'It has long ears and hops', 'tavşan'], ['DOLPHIN', 'A smart sea animal that jumps and clicks', 'yunus (adaşın!)'], ['PENGUIN', 'A black-and-white bird that swims but cannot fly', 'penguen']] },
+  { theme: 'Aşk', size: [6, 6], words: [['KISS', 'A sweet touch with the lips', 'öpücük'], ['CUDDLE', 'To hold someone close and warm', 'sarılmak'], ['FLOWER', 'A gift that blooms', 'çiçek'], ['KITTEN', 'A baby cat', 'yavru kedi'], ['ROMANCE', 'A love story', 'romantizm'], ['FOREVER', 'For all time, without end', 'sonsuza dek']] }
+];
+
+/* ---------- layout: tile the grid with self-avoiding paths of the given lengths ---------- */
+function weNeighbors(R, C) {
+  var nb = [], i, r, c;
+  for (i = 0; i < R * C; i++) {
+    r = (i / C) | 0; c = i % C; var l = [];
+    if (r > 0) l.push(i - C); if (c > 0) l.push(i - 1); if (c < C - 1) l.push(i + 1); if (r < R - 1) l.push(i + C);
+    nb.push(l);
+  }
+  return nb;
+}
+function weSubsetOK(comps, lens) {
+  /* can the free components be partitioned into the words still to place? */
+  var m = lens.length, sums = [], i, k;
+  for (i = 0; i < (1 << m); i++) { var s = 0; for (k = 0; k < m; k++) if (i & (1 << k)) s += lens[k]; sums.push(s); }
+  var rec = function (ci, avail) {
+    if (ci === comps.length) return avail === 0;
+    for (var sub = avail; sub > 0; sub = (sub - 1) & avail) if (sums[sub] === comps[ci] && rec(ci + 1, avail ^ sub)) return true;
+    return false;
+  };
+  return rec(0, (1 << m) - 1);
+}
+function weComponents(R, C, nb, used) {
+  var seen = new Uint8Array(R * C), out = [];
+  for (var i = 0; i < R * C; i++) if (!used[i] && !seen[i]) {
+    var st = [i], n = 0; seen[i] = 1;
+    while (st.length) { var a = st.pop(); n++; var l = nb[a]; for (var j = 0; j < l.length; j++) { var b = l[j]; if (!used[b] && !seen[b]) { seen[b] = 1; st.push(b); } } }
+    out.push(n);
+  }
+  return out;
+}
+/* tiles the whole grid with self-avoiding paths whose lengths are `lens`; returns one cell-list per word */
+function weLayout(R, C, lens) {
+  var n = R * C, nb = weNeighbors(R, C);
+  for (var attempt = 0; attempt < 400; attempt++) {
+    var used = new Uint8Array(n), paths = [], budget = 8000;
+    var place = function (rem) {
+      var q;
+      if (!rem.length) { for (q = 0; q < n; q++) if (!used[q]) return false; return true; }
+      if (--budget < 0) return false;
+      var best = -1, bd = 9, ties = 0, i;                       /* start at the most cramped free cell */
+      for (i = 0; i < n; i++) if (!used[i]) {
+        var d = 0, l = nb[i]; for (var j = 0; j < l.length; j++) if (!used[l[j]]) d++;
+        if (d < bd) { bd = d; best = i; ties = 1; } else if (d === bd && Math.random() < 1 / ++ties) best = i;
+      }
+      var order = shuffle(rem.slice()), tried = {};
+      for (var oi = 0; oi < order.length; oi++) {
+        var L = order[oi]; if (tried[L]) continue; tried[L] = 1;
+        var rest = rem.slice(); rest.splice(rest.indexOf(L), 1);
+        var path = [best]; used[best] = 1;
+        var walk = function (len) {
+          if (len === L) {
+            if (rest.length) { if (!weSubsetOK(weComponents(R, C, nb, used), rest)) return false; }
+            else { for (var z = 0; z < n; z++) if (!used[z]) return false; }
+            paths.push(path.slice());
+            if (place(rest)) return true;
+            paths.pop(); return false;
+          }
+          var cur = path[path.length - 1], cand = [], l2 = nb[cur], k;
+          for (k = 0; k < l2.length; k++) if (!used[l2[k]]) cand.push(l2[k]);
+          shuffle(cand);
+          for (k = 0; k < cand.length; k++) {
+            used[cand[k]] = 1; path.push(cand[k]);
+            if (walk(len + 1)) return true;
+            path.pop(); used[cand[k]] = 0;
+            if (budget < 0) return false;
+          }
+          return false;
+        };
+        if (walk(1)) return true;
+        used[best] = 0;
+        if (budget < 0) return false;
+      }
+      return false;
+    };
+    if (place(lens.slice())) return weAssign(paths, lens);
+  }
+  return null;
+}
+/* hand every path a concrete word index of the same length */
+function weAssign(paths, lens) {
+  var byLen = {}, i, out = [];
+  for (i = 0; i < lens.length; i++) (byLen[lens[i]] = byLen[lens[i]] || []).push(i);
+  for (i = 0; i < paths.length; i++) out[byLen[paths[i].length].shift()] = paths[i];
+  return out;
+}
+
+/* ---------- solver used for validation + hints ---------- */
+function wePathsFor(word, free, nb, R, C, cap) {
+  var res = [], path = [], n = free.length;
+  var rec = function (i, cell) {
+    if (res.length >= cap) return;
+    path.push(cell); free[cell] = 0;
+    if (i === word.length - 1) res.push(path.slice());
+    else for (var k = 0; k < nb[cell].length; k++) { var q = nb[cell][k]; if (free[q] && WE.letters[q] === word.charAt(i + 1)) rec(i + 1, q); }
+    free[cell] = 1; path.pop();
+  };
+  for (var c = 0; c < n; c++) if (free[c] && WE.letters[c] === word.charAt(0)) rec(0, c);
+  return res;
+}
+/* returns an array of paths (one per word, in the order of `words`) or null; budget-limited */
+function weSolve(words, free0) {
+  var nb = WE.nb, R = WE.R, C = WE.C, free = free0.slice(), sol = new Array(words.length), budget = 4000;
+  var rec = function (left) {
+    if (!left.length) return true;
+    if (--budget < 0) return true;                      /* give the benefit of the doubt */
+    var bestI = -1, bestC = null;
+    for (var i = 0; i < left.length; i++) {
+      var cs = wePathsFor(words[left[i]], free, nb, R, C, 60);
+      if (!cs.length) return false;
+      if (!bestC || cs.length < bestC.length) { bestC = cs; bestI = i; }
+    }
+    var wi = left[bestI], rest = left.slice(); rest.splice(bestI, 1);
+    for (var k = 0; k < bestC.length; k++) {
+      var p = bestC[k], j;
+      for (j = 0; j < p.length; j++) free[p[j]] = 0;
+      sol[wi] = p;
+      if (rec(rest)) return true;
+      for (j = 0; j < p.length; j++) free[p[j]] = 1;
+      if (budget < 0) return true;
+    }
+    return false;
+  };
+  var idx = []; for (var i = 0; i < words.length; i++) idx.push(i);
+  return rec(idx) ? sol : null;
+}
+
+/* ---------- state ---------- */
+function weInit(tier) {
+  var set = WE_SETS[tier], R = set.size[0], C = set.size[1], lens = set.words.map(function (w) { return w[0].length; });
+  var paths = weLayout(R, C, lens), n = R * C, i, k;
+  if (!paths) throw new Error('wend layout failed for tier ' + tier);
+  var letters = new Array(n);
+  for (i = 0; i < set.words.length; i++) {
+    var w = set.words[i][0], p = paths[i];
+    if (Math.random() < 0.5) p = p.slice().reverse();
+    for (k = 0; k < w.length; k++) letters[p[k]] = w.charAt(k);
+  }
+  var cs = ({ 3: 112, 4: 98, 5: 84, 6: 68 })[Math.max(R, C) === 6 ? 6 : (Math.max(R, C) === 5 ? 5 : (Math.max(R, C) === 4 ? 4 : 3))];
+  if (R === 3 && C === 4) cs = 104;
+  var gw = cs * C, gh = cs * R;
+  WE = { tier: tier, set: set, R: R, C: C, nb: weNeighbors(R, C), letters: letters, intended: paths, free: [], words: [], sel: [], dragging: false, t: 0, shake: 0, shakeT: 0, msg: '', msgT: 0,
+    hintCell: -1, hintT: 0, solved: false, winT: 0, cs: cs, gx: 56 + (468 - gw) / 2, gy: 132 + (400 - gh) / 2, maxLen: Math.max.apply(null, lens), hints: 0, clearT: 0 };
+  for (i = 0; i < n; i++) WE.free.push(1);
+  var cols = shuffle([0, 1, 2, 3, 4, 5, 6]);
+  for (i = 0; i < set.words.length; i++) WE.words.push({ w: set.words[i][0], clue: set.words[i][1], tr: set.words[i][2], len: set.words[i][0].length, found: false, path: null, color: LEGO[cols[i % 7]], showTr: false, born: 0 });
+}
+function weSpell() { var s = ''; for (var i = 0; i < WE.sel.length; i++) s += WE.letters[WE.sel[i]]; return s; }
+function weAdj(a, b) { var l = WE.nb[a]; for (var i = 0; i < l.length; i++) if (l[i] === b) return true; return false; }
+function weSay(msg, secs) { WE.msg = msg; WE.msgT = secs || 2.2; }
+function weFreeAfter(path) { var f = WE.free.slice(); for (var i = 0; i < path.length; i++) f[path[i]] = 0; return f; }
+function weAutoCommit() {
+  var s = weSpell();
+  for (var i = 0; i < WE.words.length; i++) {
+    var w = WE.words[i];
+    if (!w.found && w.len === WE.sel.length && w.w === s) { weCommit(i); return true; }
+  }
+  return false;
+}
+function weCommit(wi) {
+  var w = WE.words[wi], path = WE.sel.slice(), f2 = weFreeAfter(path), left = [];
+  for (var i = 0; i < WE.words.length; i++) if (!WE.words[i].found && i !== wi) left.push(WE.words[i].w);
+  if (left.length && !weSolve(left, f2)) {
+    WE.sel = []; WE.dragging = false; WE.shake = 0.35; sfx('bad');
+    weSay('Kelime doğru ama bu yoldan gidersen diğer harfler çıkmaza girer. Başka bir yol dene!', 3.4);
+    return false;
+  }
+  for (i = 0; i < path.length; i++) WE.free[path[i]] = 0;
+  w.found = true; w.path = path; w.born = WE.t;
+  WE.sel = []; WE.dragging = false; WE.hintCell = -1;
+  sfx('word');
+  for (i = 0; i < path.length; i++) {
+    var c = path[i], cx = WE.gx + (c % WE.C + 0.5) * WE.cs, cy = WE.gy + (((c / WE.C) | 0) + 0.5) * WE.cs;
+    burst(cx, cy, 5, [w.color, '#fff', '#ffd166'], { minSp: 50, maxSp: 170, up: 70, minSize: 3, maxSize: 6 });
+  }
+  var all = true; for (i = 0; i < WE.words.length; i++) if (!WE.words[i].found) all = false;
+  if (all) { WE.solved = true; WE.winT = 0; setTimeout(function () { sfx('win'); }, 300); }
+  else weSay(w.w + ' = ' + w.tr, 2.6);
+  return true;
+}
+function weHint() {
+  if (WE.solved) return;
+  var left = [], idx = [];
+  for (var i = 0; i < WE.words.length; i++) if (!WE.words[i].found) { left.push(WE.words[i].w); idx.push(i); }
+  if (!left.length) return;
+  var sol = weSolve(left, WE.free);
+  var k = 0;
+  /* prefer a word whose Turkish meaning is not yet visible */
+  for (var j = 0; j < idx.length; j++) if (!WE.words[idx[j]].showTr) { k = j; break; }
+  var w = WE.words[idx[k]]; w.showTr = true; WE.hints++;
+  if (sol && sol[k]) { WE.hintCell = sol[k][0]; WE.hintT = 4; }
+  sfx('good');
+  weSay('İpucu: “' + w.clue + '” = ' + w.tr + ' (' + w.len + ' harf). İşaretli harften başla!', 4);
+}
+function weClear() { WE.sel = []; WE.dragging = false; }
+
+/* ---------- input ---------- */
+function weCellRect(x, y) {
+  var c = Math.floor((x - WE.gx) / WE.cs), r = Math.floor((y - WE.gy) / WE.cs);
+  if (c < 0 || r < 0 || c >= WE.C || r >= WE.R) return -1;
+  return r * WE.C + c;
+}
+function weCellNear(x, y) {
+  var c = weCellRect(x, y); if (c < 0) return -1;
+  var cx = WE.gx + (c % WE.C + 0.5) * WE.cs, cy = WE.gy + (((c / WE.C) | 0) + 0.5) * WE.cs;
+  return Math.hypot(x - cx, y - cy) <= WE.cs * 0.44 ? c : -1;
+}
+function weDown(x, y) {
+  if (WE.solved) return;
+  WE.moved = false;
+  var c = weCellRect(x, y);
+  if (c < 0 || !WE.free[c]) { if (!WE.dragging) WE.sel = []; return; }
+  if (WE.sel.length) {
+    var i = WE.sel.indexOf(c);
+    if (i >= 0) { WE.sel.length = i + 1; WE.dragging = true; return; }
+    if (weAdj(WE.sel[WE.sel.length - 1], c) && WE.sel.length < WE.maxLen) { WE.sel.push(c); WE.dragging = true; sfx('num'); weAutoCommit(); return; }
+  }
+  WE.sel = [c]; WE.dragging = true; sfx('num');
+}
+function weMove(x, y) {
+  if (!WE.dragging || WE.solved) return;
+  var c = weCellNear(x, y); if (c < 0 || !WE.free[c]) return;
+  var n = WE.sel.length; if (!n) return;
+  if (n >= 2 && WE.sel[n - 2] === c) { WE.sel.pop(); sfx('click'); return; }
+  if (WE.sel.indexOf(c) >= 0) return;
+  if (weAdj(WE.sel[n - 1], c) && n < WE.maxLen) { WE.moved = true; WE.sel.push(c); sfx('num'); weAutoCommit(); }
+}
+function weUp() {
+  if (!WE.dragging) return;
+  WE.dragging = false;
+  if (WE.moved && WE.sel.length >= 2) { WE.shake = 0.28; WE.clearT = 0.28; sfx('erase'); if (WE.sel.length >= 3) weSay('Bu kelime listede yok. Tekrar dene!', 1.8); }
+}
+function weKey(code, key) {
+  if (WE.solved) return false;
+  if (key === 'h' || key === 'H') { weHint(); return true; }
+  if (code === 'Escape' || code === 'Backspace') { weClear(); return true; }
+  return false;
+}
+function weStep(dt) {
+  WE.t += dt;
+  if (WE.shake > 0) WE.shake -= dt;
+  if (WE.clearT > 0) { WE.clearT -= dt; if (WE.clearT <= 0) WE.sel = []; }
+  if (WE.msgT > 0) WE.msgT -= dt;
+  if (WE.hintT > 0) { WE.hintT -= dt; if (WE.hintT <= 0) WE.hintCell = -1; }
+  if (WE.solved) WE.winT += dt;
+}
+
+/* ---------- drawing ---------- */
+function weCenter(c) { return { x: WE.gx + (c % WE.C + 0.5) * WE.cs, y: WE.gy + (((c / WE.C) | 0) + 0.5) * WE.cs }; }
+function weSnake(path, fill, wid, a) {
+  if (!path.length) return;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.globalAlpha = a === undefined ? 1 : a;
+  var i, p;
+  ctx.beginPath();
+  for (i = 0; i < path.length; i++) { p = weCenter(path[i]); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); }
+  if (path.length === 1) ctx.lineTo(p.x + 0.01, p.y);
+  ctx.strokeStyle = INK; ctx.lineWidth = wid + 7; ctx.stroke();
+  ctx.strokeStyle = fill; ctx.lineWidth = wid; ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+function weDraw() {
+  var s = WE, cs = s.cs, gx = s.gx, gy = s.gy, gw = cs * s.C, gh = cs * s.R, i, r, c;
+  var ox = s.shake > 0 ? Math.sin(s.t * 80) * 4 * (s.shake / 0.3) : 0;
+  /* the "word so far" pill, or the latest message */
+  var spelled = weSpell(), pillW = 300;
+  if (spelled || s.msgT <= 0) {
+    panel(56 + (468 - pillW) / 2, 76, pillW, 46, '#fff', 14);
+    if (spelled) txt(spelled.split('').join(' '), 56 + 234, 100, spelled.length > 7 ? 22 : 28, INK, 'center', '900');
+    else txt('Harflerin üstünden sürükle…', 56 + 234, 100, 15, 'rgba(43,31,26,.45)', 'center', '800');
+  } else {
+    var ml = wrapLines(s.msg, 430, 14, '800'), mh = Math.max(46, ml.length * 18 + 16);
+    ctx.globalAlpha = clamp(s.msgT / 0.4, 0, 1);
+    panel(56 + 234 - 235, 74, 470, mh, '#fff7d6', 14);
+    for (i = 0; i < ml.length; i++) txt(ml[i], 56 + 234, 74 + mh / 2 - (ml.length - 1) * 9 + i * 18 + 1, 14, INK, 'center', '800');
+    ctx.globalAlpha = 1;
+  }
+  ctx.save(); ctx.translate(ox, 0);
+  /* board */
+  rr(gx - 10, gy - 10 + 6, gw + 20, gh + 20, 18); ctx.fillStyle = INK; ctx.fill();
+  rr(gx - 10, gy - 10, gw + 20, gh + 20, 18); ctx.fillStyle = '#ead9c3'; ctx.fill();
+  for (r = 0; r < s.R; r++) for (c = 0; c < s.C; c++) {
+    var x = gx + c * cs, y = gy + r * cs;
+    rr(x + 4, y + 4, cs - 8, cs - 8, cs * 0.2); ctx.fillStyle = '#fffaf2'; ctx.fill(); ink(2.4); ctx.stroke();
+  }
+  /* letters of free tiles */
+  for (i = 0; i < s.R * s.C; i++) if (s.free[i] && s.sel.indexOf(i) < 0) { var p = weCenter(i); txt(s.letters[i], p.x, p.y + 2, cs * 0.46, INK, 'center', '900'); }
+  /* found words as coloured snakes */
+  var wave = s.solved ? s.winT : -1;
+  for (i = 0; i < s.words.length; i++) {
+    var w = s.words[i]; if (!w.found) continue;
+    var pop = easeOutBack(clamp((s.t - w.born) / 0.3, 0, 1));
+    weSnake(w.path, w.color, cs * 0.58 * (0.7 + 0.3 * pop), 1);
+  }
+  for (i = 0; i < s.words.length; i++) {
+    var w2 = s.words[i]; if (!w2.found) continue;
+    for (var k = 0; k < w2.path.length; k++) {
+      var q = weCenter(w2.path[k]), bob = wave >= 0 ? -Math.max(0, Math.sin(wave * 9 - (w2.path[k] % s.C + ((w2.path[k] / s.C) | 0)) * 0.7)) * 8 : 0;
+      txtO(s.letters[w2.path[k]], q.x, q.y + 2 + bob, cs * 0.44, '#fff', INK, 5);
+    }
+  }
+  /* current selection */
+  if (s.sel.length) {
+    weSnake(s.sel, '#ffd95e', cs * 0.58, 1);
+    for (i = 0; i < s.sel.length; i++) { var qq = weCenter(s.sel[i]); txtO(s.letters[s.sel[i]], qq.x, qq.y + 2, cs * 0.44, '#fff', INK, 5); }
+  }
+  /* hint ring */
+  if (s.hintCell >= 0 && s.free[s.hintCell]) {
+    var hp = weCenter(s.hintCell), pu = 0.5 + 0.5 * Math.sin(s.t * 7);
+    ctx.beginPath(); ctx.arc(hp.x, hp.y, cs * (0.42 + 0.08 * pu), 0, 6.2832); ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,92,138,' + (0.55 + 0.45 * pu) + ')'; ctx.stroke();
+  }
+  ctx.restore();
+  /* ---- right: the clue list ---- */
+  var px = 546, pw = 338, n = s.words.length, rowH = Math.min(58, Math.floor(372 / n)), top = 112;
+  panel(px, 74, pw, 40 + n * rowH + 12, '#fffaf2');
+  txt('Tema: ' + s.set.theme, px + pw / 2, 94, 15, INK, 'center', '900');
+  for (i = 0; i < n; i++) {
+    var wd = s.words[i], ry = top + 6 + i * rowH, rh = rowH - 6;
+    if (wd.found) {
+      rr(px + 10, ry, pw - 20, rh, 12); ctx.fillStyle = shade(wd.color, 0.55); ctx.fill(); ink(2.6); ctx.stroke();
+      circle(px + 30, ry + rh / 2, 13, wd.color, 2.6); txt(String(wd.len), px + 30, ry + rh / 2 + 1, 13, '#fff', 'center', '900');
+      txt(wd.w, px + 54, ry + rh / 2 - 7, 17, INK, 'left', '900');
+      txt(wd.tr, px + 54, ry + rh / 2 + 11, 13, '#8a2f55', 'left', '800');
+    } else {
+      rr(px + 10, ry, pw - 20, rh, 12); ctx.fillStyle = '#fff'; ctx.fill(); ink(2.6); ctx.stroke();
+      circle(px + 30, ry + rh / 2, 13, '#f1e6d6', 2.6); txt(String(wd.len), px + 30, ry + rh / 2 + 1, 13, INK, 'center', '900');
+      var cl = wrapLines(wd.clue, pw - 90, 12.5, '800');
+      if (wd.showTr) { txt(cl[0], px + 54, ry + rh / 2 - 9, 12.5, INK, 'left', '800'); txt('Türkçesi: ' + wd.tr, px + 54, ry + rh / 2 + 9, 13, '#d6336c', 'left', '900'); }
+      else if (cl.length === 1) txt(cl[0], px + 54, ry + rh / 2, 12.5, INK, 'left', '800');
+      else { txt(cl[0], px + 54, ry + rh / 2 - 8, 12.5, INK, 'left', '800'); txt(cl.slice(1).join(' '), px + 54, ry + rh / 2 + 8, 12.5, INK, 'left', '800'); }
+    }
+  }
+  var by = 74 + 40 + n * rowH + 12 + 16;
+  if (btn(px, by, 160, 48, 'İpucu  (H)', { size: 15, fill: '#e3f4ff', disabled: s.solved })) weHint();
+  if (btn(px + 178, by, 160, 48, 'Seçimi sil', { size: 15, disabled: s.solved || !s.sel.length })) weClear();
+  /* couple */
+  if (by + 48 + 80 < 556) {
+    var happy = s.solved;
+    drawYunus(px + 60, 548, 0.95, { happy: true, cheer: happy, t: s.t });
+    drawSevval(px + 124, 548, 0.95, { happy: true, cheer: happy, t: s.t });
+  }
+}
+function weRules() {
+  return ['Harfleri bitişik sırayla (yukarı, aşağı, sağ, sol) sürükleyerek sağdaki ipuçlarının kelimelerini bul.',
+    'Her harf tam bir kez kullanılır; hepsini kelimelere dağıtınca bulmaca biter. Kelimenin uzunluğu ipucunun solundaki sayıdır.',
+    'Bulduğun kelimenin Türkçesi çıkar. Takılırsan “İpucu” hem Türkçesini hem başlangıç harfini gösterir.'];
+}
+
+/* =====================================================================
+   06 · SCENES — title, intro comic, the build table, the finale
+   ===================================================================== */
+var scene = 'title', sceneT = 0;
+var fade = { a: 0, dir: 0, next: null, opts: null };
+var ov = null;                                   /* overlay on top of the current scene */
+var bld = null, fin = null, intro = null, ttl = null;
+var chat = { who: 'y', text: '', t: 99 };
+var TYPE_ORDER = ['sudoku', 'blocks', 'wend'];
+function lvType(i) { return TYPE_ORDER[i % 3]; }
+function lvTier(i) { return Math.floor(i / 3); }
+function say(who, text) { chat = { who: who, text: text, t: 0 }; }
+function fmtTime(s) { var m = Math.round(s / 60); return m >= 60 ? Math.floor(m / 60) + ' sa ' + (m % 60) + ' dk' : Math.max(1, m) + ' dk'; }
+
+/* ---------- shared bits ---------- */
+function speaker(cx, cy, off) {
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(cx - 10, cy - 4); ctx.lineTo(cx - 5, cy - 4); ctx.lineTo(cx + 1, cy - 9); ctx.lineTo(cx + 1, cy + 9); ctx.lineTo(cx - 5, cy + 4); ctx.lineTo(cx - 10, cy + 4); ctx.closePath(); ctx.fill();
+  ink(2.6);
+  if (!off) { ctx.beginPath(); ctx.arc(cx + 1, cy, 6, -0.9, 0.9); ctx.stroke(); ctx.beginPath(); ctx.arc(cx + 1, cy, 11, -0.9, 0.9); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.moveTo(cx + 6, cy - 5); ctx.lineTo(cx + 14, cy + 5); ctx.moveTo(cx + 14, cy - 5); ctx.lineTo(cx + 6, cy + 5); ctx.stroke(); }
+}
+function soundBtn(x, y) {
+  if (btn(x, y, 46, 40, '', { r: 10, draw: function (cx, cy) { speaker(cx, cy, muted); } })) { muted = !muted; save.muted = muted; writeSave(); if (!muted) sfx('click'); }
+}
+function headerBar() {
+  ctx.fillStyle = '#fffaf2'; ctx.fillRect(0, 0, W, 58);
+  ctx.fillStyle = INK; ctx.fillRect(0, 58, W, 4);
+}
+function letterTile(ch, cx, cy, s, col) {
+  var r = s * 0.2;
+  circle(cx - s * 0.23, cy - s / 2 - 1, s * 0.11, shade(col, 0.1), 2.4); circle(cx + s * 0.23, cy - s / 2 - 1, s * 0.11, shade(col, 0.1), 2.4);
+  rr(cx - s / 2, cy - s / 2 + 6, s, s, r); ctx.fillStyle = INK; ctx.fill();
+  rr(cx - s / 2, cy - s / 2, s, s, r); ctx.fillStyle = col; ctx.fill(); ink(4); ctx.stroke();
+  ctx.save(); rr(cx - s / 2, cy - s / 2, s, s, r); ctx.clip(); ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(cx - s / 2, cy - s / 2, s, s * 0.14); ctx.fillStyle = 'rgba(0,0,0,.1)'; ctx.fillRect(cx - s / 2, cy + s / 2 - s * 0.16, s, s * 0.16); ctx.restore();
+  txtO(ch, cx, cy + 2, s * 0.64, '#fff', INK, 6);
+}
+function chatBubble(who, x, y, w, h) {
+  if (chat.t > 5.5 || !chat.text || chat.who !== who) return;
+  var a = clamp(Math.min(chat.t / 0.18, (5.5 - chat.t) / 0.4), 0, 1), sc = easeOutBack(chat.t / 0.25);
+  ctx.save(); ctx.globalAlpha = a; ctx.translate(x + w / 2, y + h + 14); ctx.scale(sc, sc); ctx.translate(-(x + w / 2), -(y + h + 14));
+  bubble(x, y, w, h, chat.text, x + w / 2, { size: 14 }); ctx.restore(); ctx.globalAlpha = 1;
+}
+function floaters() {                                     /* drifting bricks for title / intro */
+  if (!ttl) return;
+  for (var i = 0; i < ttl.bricks.length; i++) {
+    var b = ttl.bricks[i];
+    ctx.save(); ctx.globalAlpha = 0.9; ctx.translate(b.x, b.y); ctx.rotate(b.r);
+    brickRect(-b.w * b.s / 2, -b.s / 2, b.w, 1, b.s, b.c); ctx.restore(); ctx.globalAlpha = 1;
+  }
+}
+function floatersStep(dt) {
+  if (!ttl) return;
+  for (var i = 0; i < ttl.bricks.length; i++) { var b = ttl.bricks[i]; b.y += b.vy * dt; b.r += b.vr * dt; if (b.y > H + 40) { b.y = -40; b.x = rnd(0, W); } }
+}
+
+/* ---------- TITLE ---------- */
+function titleEnter() {
+  ttl = { t: 0, bricks: [] };
+  for (var i = 0; i < 14; i++) ttl.bricks.push({ x: rnd(0, W), y: rnd(-30, H), w: pick([1, 2, 2, 3]), c: pick(LEGO), r: rnd(0, 6), vr: rnd(-0.5, 0.5), vy: rnd(12, 30), s: rnd(15, 22) });
+  say('y', save.level > 0 ? 'Hoş geldin Şevval! Kaldığımız yerden devam edelim mi?' : 'Şevval, bir kedi yapalım mı?');
+}
+function titleStep(dt) { ttl.t += dt; floatersStep(dt); chat.t += dt; }
+function titleDraw() {
+  bgPattern(); floaters();
+  var word = 'BRICKBYBRICK', xs = [], x = 0, i, y0 = 112;
+  var layout = [[0, 5], [5, 7], [7, 12]];
+  for (var wi = 0; wi < layout.length; wi++) {
+    for (i = layout[wi][0]; i < layout[wi][1]; i++) { xs.push(x + 26); x += 58; }
+    x += 22;
+  }
+  var off = (W - (x - 22 - 6)) / 2;
+  for (i = 0; i < 12; i++) letterTile(word.charAt(i), off + xs[i], y0 + Math.sin(ttl.t * 2.4 + i * 0.55) * 5, 52, LEGO[i % LEGO.length]);
+  chip(450 - 150, 160, 300, 34, 'Yunus & Şevval’in Lego Kedisi', '#fff', 16);
+  var cs = 15, ox = 330, oy = 206;
+  drawPlate(ox, oy, cs);
+  var shown = save.level > 0 ? Math.min(save.level, TOTAL) : Math.min(TOTAL, Math.floor((ttl.t % 11) * 7));
+  drawCatModel(shown, ox, oy, cs, { ghost: true });
+  var yb = Math.sin(ttl.t * 3) * 3;
+  drawYunus(190, 440 + yb, 2.1, { happy: true, cheer: ttl.t % 4 < 0.9, t: ttl.t });
+  drawSevval(710, 440 - yb, 2.1, { happy: true, cheer: (ttl.t + 2) % 4 < 0.9, t: ttl.t });
+  chatBubble('y', 36, 196, 214, 70);
+  soundBtn(W - 62, 12);
+  var done = save.level >= TOTAL;
+  if (save.level === 0) {
+    if (btn(320, 468, 260, 58, 'Oyna', { size: 24, fill: '#ffd95e' })) startFromTitle();
+  } else {
+    if (btn(300, 468, 280, 58, done ? 'Kedini gör' : 'Devam Et · Bölüm ' + (save.level + 1), { size: 21, fill: '#ffd95e' })) startFromTitle();
+    if (btn(600, 476, 130, 42, 'Yeni oyun', { size: 14 })) ov = { kind: 'newgame', t: 0 };
+  }
+}
+function startFromTitle() {
+  if (save.level >= TOTAL) go('final');
+  else if (!save.intro) go('intro');
+  else go('build');
+}
+
+/* ---------- INTRO comic ---------- */
+function introEnter() { intro = { t: 0 }; ttl = ttl || { t: 0, bricks: [] }; }
+function introStep(dt) { intro.t += dt; floatersStep(dt); }
+function comicPanel(i, x, y, w, h, bg, fn) {
+  var t0 = 0.4 + i * 1.5, u = easeOutBack(clamp((intro.t - t0) / 0.35, 0, 1));
+  if (u <= 0) return;
+  ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(u, u); ctx.translate(-w / 2, -h / 2);
+  rr(0, 7, w, h, 14); ctx.fillStyle = INK; ctx.fill();
+  rr(0, 0, w, h, 14); ctx.fillStyle = bg; ctx.fill();
+  ctx.save(); rr(0, 0, w, h, 14); ctx.clip(); fn(w, h, clamp(intro.t - t0, 0, 9)); ctx.restore();
+  rr(0, 0, w, h, 14); ink(4.5); ctx.stroke();
+  ctx.restore();
+}
+function caption(x, y, w, h, text, size) {
+  fs(x, y, w, h, 6, '#fff3b0', 3);
+  var lines = wrapLines(text, w - 16, size || 13, '800'), lh = (size || 13) * 1.2;
+  for (var i = 0; i < lines.length; i++) txt(lines[i], x + w / 2, y + h / 2 - (lines.length - 1) * lh / 2 + i * lh, size || 13, INK, 'center', '800');
+}
+function introDraw() {
+  bgPattern(); floaters();
+  txtO('Bir akşam…', 450, 52, 34, '#fff', INK, 8);
+  var pw = 262, ph = 330, py = 92;
+  comicPanel(0, 36, py, pw, ph, '#d9edff', function (w, h, t) {
+    ctx.fillStyle = '#f3dcb7'; ctx.fillRect(0, h - 96, w, 96); ctx.fillStyle = INK; ctx.fillRect(0, h - 98, w, 4);
+    fs(30, h - 92, 200, 26, 6, '#c98a56', 3.5);
+    var cols = [LEGO[0], LEGO[1], LEGO[2], LEGO[3], LEGO[5]], bx = [46, 82, 118, 150, 186];
+    for (var i = 0; i < 5; i++) brickRect(bx[i], h - 92 - 22 - (i % 2) * 2, i % 2 ? 2 : 1, 1, 22, cols[i]);
+    drawYunus(88, h - 74 + Math.sin(t * 5) * 2, 2.3, { happy: true, cheer: true, t: t });
+    drawSevval(188, h - 74, 2.1, { happy: true });
+    caption(10, 10, 140, 30, 'Bir sürü Lego!', 13);
+    bubble(20, 46, 222, 46, 'Şevval, bak! Masanın üstü Lego dolu!', 88, { size: 14 });
+  });
+  comicPanel(1, 319, py, pw, ph, '#fff2cc', function (w, h, t) {
+    var cs = 8, ox = 122, oy = 100;
+    drawPlate(ox, oy, cs); drawCatModel(0, ox, oy, cs, { ghost: true, next: t });
+    drawSevval(54, 200, 1.8, { happy: true });
+    bubble(10, 16, 172, 46, 'Bir kedi yapalım mı?', 54, { size: 15 });
+    fs(12, h - 92, w - 24, 80, 10, '#fff', 3.5);
+    var ls = wrapLines('Ama her tuğla için bir bulmaca çözmemiz lazım: Sudoku, blok bulmaca, kelime yolu…', w - 56, 13.5, '800');
+    for (var i = 0; i < ls.length; i++) txt(ls[i], w / 2, h - 92 + 40 - (ls.length - 1) * 9 + i * 18, 13.5, INK, 'center', '800');
+  });
+  comicPanel(2, 602, py, pw, ph, '#ffe0ec', function (w, h, t) {
+    var cs = 7, ox = (w - CAT_W * cs) / 2, oy = 28;
+    rr(ox - 16, oy - 14, CAT_W * cs + 32, CAT_H * cs + 28, 30); ctx.fillStyle = '#fff'; ctx.fill(); ink(3.5); ctx.stroke();
+    drawCatModel(TOTAL, ox, oy, cs, {});
+    circle(122, 154, 5, '#fff', 3); circle(112, 166, 7, '#fff', 3);
+    drawYunus(84, h - 48, 2.0, { happy: true, cheer: true, t: t });
+    drawSevval(176, h - 48, 1.9, { happy: true, cheer: true, t: t });
+    caption(14, h - 44, w - 28, 32, 'Tuğla tuğla… Hazır mısın?', 14);
+  });
+  var allIn = intro.t > 0.4 + 2 * 1.5 + 0.5;
+  if (allIn) {
+    ctx.globalAlpha = clamp((intro.t - 3.9) / 0.35, 0, 1);
+    if (btn(310, 456, 280, 60, 'Başlayalım! »', { size: 22, fill: '#ffd95e' })) { save.intro = true; writeSave(); go('build'); }
+    ctx.globalAlpha = 1;
+  }
+  if (btn(W - 118, 14, 100, 36, 'Geç »', { size: 14 })) { save.intro = true; writeSave(); go('build'); }
+}
+
+/* ---------- BUILD table ---------- */
+var BX = 232, BY = 98, BCS = 26;
+var LINES_IDLE = [['y', 'Sıradaki parça için hazır mısın?'], ['s', 'Bir bulmaca daha, bir tuğla daha!'], ['y', 'Kedi şimdiden tatlı görünüyor!'], ['s', 'Tuğla tuğla ilerliyoruz.'], ['y', 'Birlikte yaparız!'], ['s', 'Bu kedi harika olacak!']];
+var LINES_DROP = [['s', 'Tam oturdu!'], ['y', 'Bir parça daha!'], ['s', 'Kedi belirginleşiyor…'], ['y', 'Harika gidiyoruz!'], ['s', 'Çok güzel oldu!']];
+function buildEnter(o) {
+  bld = { t: 0, banner: null, bannerT: 0, cheer: 0, finishing: false, finT: 0, droppedOnce: false };
+  var n = save.level;
+  if (o && o.drop !== undefined) { dropStart(o.drop); say('y', ''); }
+  else if (n === 0) say('y', 'İlk parça için bir bulmaca çözelim!');
+  else { var l = pick(LINES_IDLE); say(l[0], l[1]); }
+}
+function buildStep(dt) {
+  bld.t += dt; chat.t += dt;
+  var wasLanded = dropA && dropA.landed;
+  var done = dropUpdate(dt, BX, BY, BCS);
+  if (dropA && dropA.landed && !wasLanded) {
+    bld.cheer = 1.6;
+    var n = save.level, ch = chapterOf(n - 1);
+    var l = pick(LINES_DROP); say(l[0], n === 26 ? 'Yarısı tamam!' : (n === 1 ? 'İlk parça yerinde!' : l[1]));
+    floatHearts(BX + 8 * BCS, BY + 2 * BCS, 4);
+    if (n === CHAPTERS[ch].to && n < TOTAL) { bld.banner = 'Aşama tamam: ' + CHAPTERS[ch].name + '!'; bld.bannerT = 0; setTimeout(function () { sfx('clear'); }, 450); burst(W / 2, 150, 26, LEGO, { kind: 'star', up: 160, minSp: 80, maxSp: 300, minSize: 5, maxSize: 10 }); }
+  }
+  if (done && save.level >= TOTAL) { bld.finishing = true; bld.finT = 0; }
+  if (bld.cheer > 0) bld.cheer -= dt;
+  if (bld.banner) { bld.bannerT += dt; if (bld.bannerT > 3.2) bld.banner = null; }
+  if (bld.finishing) { bld.finT += dt; if (bld.finT > 1.8 && !fade.dir) go('final'); }
+}
+function buildCards() {
+  var n = save.level, ch = chapterOf(Math.min(n, TOTAL - 1)), C = CHAPTERS[ch];
+  /* left: chapter card */
+  panel(14, 84, 196, 178, '#fffaf2');
+  txt('AŞAMA ' + (ch + 1) + ' / ' + CHAPTERS.length, 112, 106, 12, 'rgba(43,31,26,.5)', 'center', '900');
+  var cl = wrapLines(C.name, 170, 18, '900');
+  for (var i = 0; i < cl.length; i++) txt(cl[i], 112, 130 + i * 22, 18, INK, 'center', '900');
+  var cdone = clamp(n - C.from, 0, C.to - C.from);
+  bar(30, 170, 164, 14, cdone / (C.to - C.from), '#F58A3A');
+  txt('Bu aşama: ' + cdone + ' / ' + (C.to - C.from), 112, 198, 13, INK, 'center', '800');
+  bar(30, 212, 164, 14, n / TOTAL, '#4FB06A');
+  txt('Kedi: ' + n + ' / ' + TOTAL, 112, 240, 13, INK, 'center', '800');
+  /* right: next puzzle card */
+  if (n < TOTAL) {
+    var type = lvType(n), tier = lvTier(n), T = TYPES[type];
+    panel(676, 84, 212, 250, '#fffaf2');
+    txt('SIRADAKİ BULMACA', 782, 103, 12, 'rgba(43,31,26,.5)', 'center', '900');
+    drawTypeIcon(type, 782, 140, 54);
+    txt(T.name, 782, 184, 19, INK, 'center', '900');
+    txt(T.label(tier), 782, 205, 13, 'rgba(43,31,26,.65)', 'center', '800');
+    txt('Kazanacağın parça', 782, 228, 12, 'rgba(43,31,26,.5)', 'center', '800');
+    brickPreview(n, 782, 256, 100, 40);
+    if (btn(692, 280, 180, 44, 'Başla »', { size: 18, fill: '#ffd95e', disabled: !!dropA || bld.finishing })) startPuzzle(n);
+  }
+}
+function buildDraw() {
+  bgPattern();
+  headerBar();
+  if (btn(12, 10, 108, 40, '« Ana ekran', { size: 13 })) go('title');
+  var n = save.level;
+  txt('Bölüm ' + Math.min(n + 1, TOTAL) + ' / ' + TOTAL, 450, 22, 17, INK, 'center', '900');
+  /* progress strip */
+  for (var i = 0; i < TOTAL; i++) {
+    var b = BRICKS[i], px = 450 - (TOTAL * 11) / 2 + i * 11;
+    rr(px, 36, 9, 12, 2.5); ctx.fillStyle = i < n ? CAT_COL[b[4]] : '#e7dccd'; ctx.fill(); ink(1.6); ctx.stroke();
+  }
+  soundBtn(W - 62, 10);
+  /* table: plate + cat */
+  drawPlate(BX, BY, BCS);
+  drawCatModel(n, BX, BY, BCS, { ghost: true, next: (dropA || bld.finishing || n >= TOTAL) ? undefined : bld.t, skip: dropIdx(), glow: dropGlow() });
+  dropDraw(BX, BY, BCS);
+  buildCards();
+  var cheer = bld.cheer > 0;
+  var yb = cheer ? Math.abs(Math.sin(bld.t * 12)) * 8 : 0;
+  drawYunus(112, 534 - yb, 1.7, { happy: true, cheer: cheer, t: bld.t });
+  drawSevval(790, 534 - (cheer ? Math.abs(Math.sin(bld.t * 12 + 1)) * 8 : 0), 1.7, { happy: true, cheer: cheer, t: bld.t });
+  chatBubble('y', 24, 344, 200, 62);
+  chatBubble('s', 676, 350, 200, 46);
+  if (bld.banner) {
+    var u = easeOutBack(clamp(bld.bannerT / 0.4, 0, 1)), a = clamp((3.2 - bld.bannerT) / 0.4, 0, 1);
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(450, 104); ctx.scale(u, u);
+    txtO(bld.banner, 0, 0, 30, '#fff', INK, 9); ctx.restore(); ctx.globalAlpha = 1;
+  }
+  if (bld.finishing) {
+    var u2 = easeOutBack(clamp(bld.finT / 0.5, 0, 1));
+    ctx.save(); ctx.translate(450, 80); ctx.scale(u2, u2); txtO('Kedi tamamlandı!', 0, 0, 40, '#fff', INK, 10); ctx.restore();
+  }
+}
+
+/* ---------- FINALE ---------- */
+var END_LINES = ['Şevval,', 'elli bir bulmaca, elli bir tuğla…', 've karşımızda bizim kedimiz!', 'Her parçayı birlikte yerleştirdik;', 'en güzel şeyler böyle kuruluyor.', 'İyi ki varsın.', '— Yunus Can'];
+function finEnter() {
+  fin = { t: 0, jump: 0, jumpT: 0, meow: 0, heartT: 0, said: false };
+  sfx('win'); burst(W / 2, 200, 40, LEGO, { kind: 'star', up: 220, minSp: 80, maxSp: 340, minSize: 5, maxSize: 11 });
+  ttl = ttl || { t: 0, bricks: [] };
+}
+function finStep(dt) {
+  fin.t += dt; fin.heartT -= dt;
+  if (fin.jumpT > 0) fin.jumpT -= dt;
+  if (fin.meow > 0) fin.meow -= dt;
+  if (fin.heartT <= 0) { floatHearts(rnd(280, 620), 300, 2); fin.heartT = 0.9; }
+  if (Math.random() < dt * 2.2) burst(rnd(60, 840), -10, 1, LEGO, { g: 90, up: -40, minSp: 10, maxSp: 40, minSize: 6, maxSize: 11, minLife: 3, maxLife: 4 });
+}
+function finMeow() {
+  sfx('meow'); fin.jumpT = 0.8; fin.meow = 1.4;
+  floatHearts(450, 170, 5);
+}
+function finDraw() {
+  bgPattern();
+  var cs = 22, ox = 274, oy = 122;
+  txtO('KEDİ TAMAMLANDI!', 450, 52, 46, '#fff', INK, 10);
+  drawPlate(ox, oy, cs);
+  var j = fin.jumpT > 0 ? Math.sin((1 - fin.jumpT / 0.8) * Math.PI) * 34 : 0;
+  ctx.save(); ctx.translate(0, -j);
+  drawCatAlive(ox, oy, cs, fin.t, { jump: 3, happy: fin.meow > 0 || (fin.t % 6 < 2.2), tailBoost: fin.meow > 0 ? 1 : 0 });
+  ctx.restore();
+  var yb = Math.abs(Math.sin(fin.t * 5)) * 10;
+  drawYunus(130, 470 - yb, 2.2, { happy: true, cheer: true, t: fin.t });
+  drawSevval(770, 470 - Math.abs(Math.sin(fin.t * 5 + 1)) * 10, 2.2, { happy: true, cheer: true, t: fin.t });
+  if (fin.meow > 0) bubble(ox + CAT_W * cs / 2 - 70, oy - 44, 140, 44, 'Miyaaav!', undefined, { size: 20, tail: 10 });
+  /* click the cat to hear it */
+  if (!ov && ptr.clickAt && inR(ptr.clickAt.x, ptr.clickAt.y, ox, oy, CAT_W * cs, CAT_H * cs)) { ptr.clickAt = null; finMeow(); }
+  if (btn(290, 496, 150, 48, 'Miyav!', { size: 19, fill: '#ffd95e' })) finMeow();
+  if (btn(458, 496, 150, 48, 'Mesaj', { size: 18, fill: '#ffd1e1', draw: function (cx, cy) { drawHeartAt(cx + 40, cy, 9); } })) ov = { kind: 'message', t: 0 };
+  if (btn(W - 150, 14, 132, 38, 'Ana ekran', { size: 13 })) go('title');
+  soundBtn(W - 62 - 150 + 10, 14 + 0);
+}
+
+/* =====================================================================
+   07 · GAME — puzzle runner, overlays, input routing, main loop
+   ===================================================================== */
+var NOOP = function () {};
+var TYPES = {
+  sudoku: { name: 'Sudoku', label: function (t) { return suCfg(t).name; }, init: suInit, step: suStep, draw: suDraw, down: suDown, move: NOOP, up: NOOP, key: suKey, solved: function () { return SU.solved; }, rules: function () { return suRules(); }, how: 'Sudoku nasıl oynanır?' },
+  blocks: { name: 'Blok Bulmaca', label: function (t) { return 'Hedef: ' + BL_GOAL[t] + ' çizgi'; }, init: blInit, step: blStep, draw: blDraw, down: blDown, move: blMove, up: blUp, key: blKey, solved: function () { return BL.solved; }, rules: function () { return blRules(); }, how: 'Blok Bulmaca nasıl oynanır?' },
+  wend: { name: 'Kelime Yolu', label: function (t) { return 'Tema: ' + WE_SETS[t].theme; }, init: weInit, step: weStep, draw: weDraw, down: weDown, move: weMove, up: weUp, key: weKey, solved: function () { return WE.solved; }, rules: function () { return weRules(); }, how: 'Kelime Yolu nasıl oynanır?' }
+};
+var pz = null;
+
+/* ---------- scene switching ---------- */
+function go(name, opts) { if (fade.dir) return; fade.dir = 1; fade.next = name; fade.opts = opts || null; }
+function enter(name, opts) {
+  scene = name; sceneT = 0; ov = null; parts.length = 0; ptr.clickAt = null;
+  if (name === 'title') titleEnter();
+  else if (name === 'intro') introEnter();
+  else if (name === 'build') buildEnter(opts);
+  else if (name === 'puzzle') puzzleEnter(opts);
+  else if (name === 'final') finEnter();
+}
+function startPuzzle(lvl) { go('puzzle', { lvl: lvl }); }
+function finishLevel() {
+  save.level = Math.max(save.level, pz.lvl + 1); writeSave();
+  var l = pz.lvl; ov = null;
+  go('build', { drop: l });
+}
+
+/* ---------- puzzle scene ---------- */
+function openRules(first) {
+  ov = { kind: 'rules', t: 0, first: !!first, type: pz.type, lines: pz.T.rules(), title: pz.T.how };
+}
+function puzzleEnter(o) {
+  var lvl = o.lvl, type = lvType(lvl), tier = lvTier(lvl), T = TYPES[type];
+  T.init(tier);
+  pz = { lvl: lvl, type: type, tier: tier, T: T, t: 0, solvedT: -1, saveT: 0 };
+  if (!save.seen[type]) openRules(true);
+}
+function puzzleStep(dt) {
+  pz.t += dt;
+  if (pz.solvedT < 0 && !ov) { save.sec += dt; pz.saveT += dt; if (pz.saveT > 15) { pz.saveT = 0; writeSave(); } }
+  pz.T.step(dt);
+  if (pz.solvedT < 0 && pz.T.solved()) { pz.solvedT = 0; writeSave(); burst(W / 2, 230, 34, LEGO, { kind: 'star', up: 200, minSp: 80, maxSp: 330, minSize: 5, maxSize: 10 }); floatHearts(W / 2, 330, 6); }
+  if (pz.solvedT >= 0) { pz.solvedT += dt; if (pz.solvedT > 1.7 && !ov) ov = { kind: 'clear', t: 0 }; }
+}
+function puzzleDraw() {
+  bgPattern();
+  var T = pz.T, locked = !!ov || pz.solvedT >= 0 || fade.dir !== 0;
+  uiLock = locked;
+  T.draw();
+  uiLock = !!ov || fade.dir !== 0 || pz.solvedT >= 0;
+  headerBar();
+  if (btn(12, 10, 112, 40, '« Kedi', { size: 14 })) go('build');
+  txt('Bölüm ' + (pz.lvl + 1) + ' / ' + TOTAL, 450, 22, 17, INK, 'center', '900');
+  txt(T.name + ' · ' + T.label(pz.tier), 450, 43, 12.5, 'rgba(43,31,26,.6)', 'center', '800');
+  soundBtn(W - 60, 10);
+  if (btn(W - 60 - 6 - 84, 10, 84, 40, 'Atla', { size: 14 })) ov = { kind: 'skip', t: 0 };
+  if (btn(W - 60 - 6 - 84 - 6 - 42, 10, 42, 40, '?', { size: 18 })) openRules(false);
+  uiLock = false;
+}
+
+/* ---------- overlays ---------- */
+function ovBegin(w, h) {
+  var u = 0.9 + 0.1 * easeOutBack(clamp(ov.t / 0.26, 0, 1)), a = clamp(ov.t / 0.14, 0, 1);
+  ctx.fillStyle = 'rgba(43,31,26,' + (0.5 * a) + ')'; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.globalAlpha = a; ctx.translate(W / 2, H / 2); ctx.scale(u, u); ctx.translate(-W / 2, -H / 2);
+  panel((W - w) / 2, (H - h) / 2, w, h, '#fffaf2', 20);
+  return { x: (W - w) / 2, y: (H - h) / 2, w: w, h: h };
+}
+function ovEnd() { ctx.restore(); }
+function closeRules() { if (ov && ov.first) { save.seen[ov.type] = true; writeSave(); } ov = null; }
+function newGame() {
+  save.level = 0; save.seen = {}; save.sec = 0; save.skips = 0; save.intro = false; writeSave();
+  ov = null; go('intro');
+}
+function overlayDraw() {
+  var k = ov.kind, c, i;
+  if (k === 'rules') {
+    c = ovBegin(600, 372);
+    drawTypeIcon(ov.type, c.x + 62, c.y + 64, 58);
+    txt(ov.title, c.x + 118, c.y + 56, 25, INK, 'left', '900');
+    var y = c.y + 108;
+    for (i = 0; i < ov.lines.length; i++) {
+      circle(c.x + 44, y + 12, 15, LEGO[i], 3); txt(String(i + 1), c.x + 44, y + 13, 15, '#fff', 'center', '900');
+      var ls = wrapLines(ov.lines[i], c.w - 120, 16, '800');
+      for (var j = 0; j < ls.length; j++) txt(ls[j], c.x + 74, y + 12 + j * 21 - (ls.length - 1) * 10, 16, INK, 'left', '800');
+      y += Math.max(58, ls.length * 21 + 16);
+    }
+    if (btn(c.x + c.w / 2 - 110, c.y + c.h - 72, 220, 52, 'Anladım!', { size: 19, fill: '#ffd95e' })) closeRules();
+    ovEnd();
+  } else if (k === 'clear') {
+    drawYunus(130, 470, 2.3, { happy: true, cheer: true, t: ov.t });
+    drawSevval(770, 470, 2.3, { happy: true, cheer: true, t: ov.t });
+    c = ovBegin(440, 340);
+    txtO('Bölüm tamam!', c.x + c.w / 2, c.y + 52, 38, '#fff', INK, 9);
+    txt('Yeni bir tuğla kazandın', c.x + c.w / 2, c.y + 98, 17, INK, 'center', '800');
+    var bob = Math.sin(ov.t * 4) * 5;
+    brickPreview(pz.lvl, c.x + c.w / 2, c.y + 160 + bob, 150, 76, 76);
+    txt('Parça ' + (pz.lvl + 1) + ' / ' + TOTAL, c.x + c.w / 2, c.y + 224, 15, 'rgba(43,31,26,.6)', 'center', '900');
+    if (btn(c.x + c.w / 2 - 130, c.y + c.h - 76, 260, 54, 'Parçayı yerleştir »', { size: 19, fill: '#ffd95e' })) finishLevel();
+    ovEnd();
+  } else if (k === 'skip') {
+    c = ovBegin(470, 236);
+    txt('Bu bölümü atlayalım mı?', c.x + c.w / 2, c.y + 50, 25, INK, 'center', '900');
+    para('Atlarsan tuğla yine de yerine oturur. Ama bulmaca çözmek daha eğlenceli!', c.x + c.w / 2, c.y + 100, c.w - 60, 16, INK, 22, 'center', '800');
+    if (btn(c.x + 28, c.y + c.h - 72, 190, 50, 'Vazgeç', { size: 17, fill: '#e3f4ff' })) ov = null;
+    if (btn(c.x + c.w - 218, c.y + c.h - 72, 190, 50, 'Atla »', { size: 17 })) { save.skips++; finishLevel(); }
+    ovEnd();
+  } else if (k === 'newgame') {
+    c = ovBegin(480, 236);
+    txt('Yeni oyun başlasın mı?', c.x + c.w / 2, c.y + 50, 25, INK, 'center', '900');
+    para('Şu anki ilerleme silinir ve kedi baştan, boş plakadan başlar.', c.x + c.w / 2, c.y + 100, c.w - 60, 16, INK, 22, 'center', '800');
+    if (btn(c.x + 28, c.y + c.h - 72, 200, 50, 'Vazgeç', { size: 17, fill: '#e3f4ff' })) ov = null;
+    if (btn(c.x + c.w - 228, c.y + c.h - 72, 200, 50, 'Evet, baştan', { size: 17 })) newGame();
+    ovEnd();
+  } else if (k === 'message') {
+    c = ovBegin(560, 440);
+    for (i = 0; i < END_LINES.length; i++) {
+      var last = i === END_LINES.length - 1;
+      txt(END_LINES[i], c.x + c.w / 2, c.y + 52 + i * 34 + (last ? 12 : 0), i === 0 ? 30 : (last ? 24 : 20), last ? '#d6336c' : INK, 'center', last || i === 0 ? '900' : '800');
+    }
+    drawHeartAt(c.x + c.w / 2, c.y + 52 + (END_LINES.length - 1) * 34 + 12 + 36, 15 + Math.sin(ov.t * 5) * 1.5);
+    txt('Toplam süre: ' + fmtTime(save.sec), c.x + c.w / 2, c.y + c.h - 86, 13, 'rgba(43,31,26,.5)', 'center', '800');
+    if (btn(c.x + c.w / 2 - 80, c.y + c.h - 66, 160, 46, 'Kapat', { size: 17, fill: '#ffd95e' })) ov = null;
+    ovEnd();
+  }
+}
+function ovPrimary() {
+  if (!ov || ov.t < 0.3) return;
+  if (ov.kind === 'rules') closeRules();
+  else if (ov.kind === 'clear') finishLevel();
+  else if (ov.kind === 'message') ov = null;
+}
+
+/* ---------- input routing (called by the listeners in the core) ---------- */
+function onPointerDown(x, y) { if (fade.dir || ov) return; if (scene === 'puzzle' && pz && pz.solvedT < 0) pz.T.down(x, y); }
+function onPointerMove(x, y) { if (fade.dir || ov) return; if (scene === 'puzzle' && pz && pz.solvedT < 0) pz.T.move(x, y); }
+function onPointerUp(x, y) { if (fade.dir) return; if (scene === 'puzzle' && pz && pz.solvedT < 0 && !ov) pz.T.up(x, y); }
+function onKey(code, key) {
+  if (fade.dir) return;
+  if (ov) { if (code === 'Enter' || code === 'Space') ovPrimary(); else if (code === 'Escape' && ov.kind !== 'clear') { if (ov.kind === 'rules') closeRules(); else ov = null; } return; }
+  var enter_ = code === 'Enter' || code === 'Space';
+  if (scene === 'puzzle') { if (pz.solvedT < 0 && pz.T.key(code, key)) return; }
+  else if (scene === 'title' && enter_) startFromTitle();
+  else if (scene === 'build' && enter_ && !dropA && save.level < TOTAL && !bld.finishing) startPuzzle(save.level);
+  else if (scene === 'final' && enter_) finMeow();
+  else if (scene === 'intro' && enter_ && intro.t > 4.3) { save.intro = true; writeSave(); go('build'); }
+}
+
+/* ---------- frame ---------- */
+function update(dt) {
+  sceneT += dt;
+  if (ov) ov.t += dt;
+  if (scene === 'title') titleStep(dt);
+  else if (scene === 'intro') introStep(dt);
+  else if (scene === 'build') buildStep(dt);
+  else if (scene === 'puzzle') puzzleStep(dt);
+  else if (scene === 'final') finStep(dt);
+  updateParts(dt);
+  if (fade.dir === 1) { fade.a += dt * 4.6; if (fade.a >= 1) { fade.a = 1; enter(fade.next, fade.opts); fade.dir = -1; } }
+  else if (fade.dir === -1) { fade.a -= dt * 3.8; if (fade.a <= 0) { fade.a = 0; fade.dir = 0; } }
+}
+function render() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  uiLock = fade.dir !== 0 || !!ov;
+  if (scene === 'title') titleDraw();
+  else if (scene === 'intro') introDraw();
+  else if (scene === 'build') buildDraw();
+  else if (scene === 'puzzle') puzzleDraw();
+  else if (scene === 'final') finDraw();
+  drawParts();
+  uiLock = fade.dir !== 0;
+  if (ov) overlayDraw();
+  uiLock = false;
+  if (fade.a > 0) { ctx.fillStyle = 'rgba(255,244,232,' + fade.a + ')'; ctx.fillRect(0, 0, W, H); }
+}
+function stepFrame(dt) { update(dt); render(); ptr.clickAt = null; }
+var lastTs = 0;
+function loop(ts) {
+  var dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
+  lastTs = ts;
+  try { stepFrame(dt); } catch (e) { if (window.console) console.error(e); }
+  requestAnimationFrame(loop);
+}
+loadSave();
+save.level = clamp(save.level, 0, TOTAL);
+enter('title');
+window.addEventListener('beforeunload', function () { writeSave(); });
+requestAnimationFrame(loop);
+
+})();
+</script>
+<script>try{if(window.parent!==window){window.parent.postMessage("salon:hazir","*")}}catch(e){}</script>
+</body>
+</html>
